@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest>=8
+pyjwt>=2.8          # integration tests mint JWTs
+psycopg2-binary>=2.9  # database-backed tests
