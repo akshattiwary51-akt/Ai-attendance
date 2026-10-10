@@ -1,4 +1,7 @@
 """SnapClass entry point."""
+import os
+
+from dotenv import load_dotenv
 import streamlit as st
 
 from src.components.dialog_auto_enroll import auto_enroll_dialog
@@ -10,6 +13,8 @@ from src.utils import session
 
 
 def main() -> None:
+    if st.runtime.exists() and "PYTEST_CURRENT_TEST" not in os.environ:
+        load_dotenv()
     st.set_page_config(
         page_title="SnapClass - Making Attendance faster using AI",
         page_icon="https://i.ibb.co/YTYGn5qV/logo.png",

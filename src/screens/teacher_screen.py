@@ -16,6 +16,8 @@ from src.components.footer import footer_dashboard
 from src.components.header import header_dashboard
 from src.components.subject_card import subject_card
 from src.screens.teacher_auth import teacher_screen_login, teacher_screen_register
+from src.components.assistant_chat import assistant_chat
+from src.screens.teacher_analytics import teacher_tab_analytics
 from src.screens.teacher_insights import subject_detail_view, teacher_tab_dashboard, teacher_tab_settings, teacher_tab_students
 from src.screens.teacher_sessions import teacher_tab_attendance_records
 from src.services import attendance_service, enrollment_service, recognition_service, session_service, subject_service
@@ -29,8 +31,10 @@ TABS = {
     "dashboard": ("Dashboard", ":material/dashboard:"),
     "manage_subjects": ("Subjects", ":material/book_ribbon:"),
     "students": ("Students", ":material/groups:"),
+    "analytics": ("Analytics", ":material/monitoring:"),
     "take_attendance": ("Take Attendance", ":material/ar_on_you:"),
     "attendance_records": ("Sessions", ":material/cards_stack:"),
+    "assistant": ("Assistant", ":material/smart_toy:"),
     "settings": ("Settings", ":material/settings:"),
 }
 
@@ -69,10 +73,16 @@ def teacher_dashboard() -> None:
     st.divider()
 
     {"dashboard": teacher_tab_dashboard, "manage_subjects": teacher_tab_manage_subjects, "students": teacher_tab_students,
-     "take_attendance": teacher_tab_take_attendance, "attendance_records": teacher_tab_attendance_records, "settings": teacher_tab_settings}[
+     "analytics": teacher_tab_analytics,
+     "take_attendance": teacher_tab_take_attendance, "attendance_records": teacher_tab_attendance_records, "settings": teacher_tab_settings, "assistant": teacher_tab_assistant}[
         st.session_state.current_teacher_tab
     ]()
     footer_dashboard()
+
+
+def teacher_tab_assistant() -> None:
+    st.header("Attendance Assistant")
+    assistant_chat("TEACHER")
 
 
 def _load_subjects(teacher_id: int) -> list[dict] | None:
@@ -165,6 +175,7 @@ def _run_face_analysis(subject_id: int, images: list) -> None:
         with st.spinner("Deep scanning classroom photos..."):
             analysis = recognition_service.analyze_photos(images, roster)
         rows, records = attendance_service.build_attendance_rows(roster, analysis.detections)
+        session_service.record_recognition_stats(teacher_id, session["session_id"], recognition_service.face_stats(analysis))
     except AppError as exc:
         show_error(exc)
         return

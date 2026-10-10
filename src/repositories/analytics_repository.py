@@ -36,3 +36,31 @@ def set_subject_target(subject_id: int, target: float) -> None:
 
 def admin_overview(tz: str) -> dict:
     return call_rpc("admin_overview", {"p_tz": tz})
+
+
+def sessions_detail(subject_ids: Iterable[int] | None = None) -> list[dict]:
+    """Sessions with times and recognition stats (RLS-scoped): the input of anomaly detection and the heatmap."""
+    cols = "session_id, subject_id, teacher_id, method, status, started_at, ended_at, recognition_stats"
+    if subject_ids is None:
+        return fetch_all(lambda: table("attendance_sessions").select(cols).order("started_at").order("session_id"), "analytics.sessions_detail")
+    rows: list[dict] = []
+    for ids in chunked(subject_ids):
+        rows += fetch_all(lambda ids=ids: table("attendance_sessions").select(cols).in_("subject_id", ids).order("started_at").order("session_id"),
+                          "analytics.sessions_detail")
+    return rows
+
+
+def records_for_sessions(session_ids: Iterable[int]) -> list[dict]:
+    rows: list[dict] = []
+    for ids in chunked(session_ids):
+        rows += fetch_all(lambda ids=ids: table("attendance_records").select("record_id, session_id, student_id, status, source, confidence")
+                          .in_("session_id", ids).order("record_id"), "analytics.records")
+    return rows
+
+
+def corrections_for_records(record_ids: Iterable[int]) -> list[dict]:
+    rows: list[dict] = []
+    for ids in chunked(record_ids):
+        rows += fetch_all(lambda ids=ids: table("attendance_corrections").select("correction_id, record_id, old_status, new_status, corrected_by, created_at, reverted_at")
+                          .in_("record_id", ids).order("correction_id"), "analytics.corrections")
+    return rows

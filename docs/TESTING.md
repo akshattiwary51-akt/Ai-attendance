@@ -43,3 +43,9 @@ Not covered by automated tests: **GoTrue / Supabase Auth itself** (sign-up, sign
 
 ## Phase 8 tests
 `test_fusion_service.py` (every fusion rule, policies, weight, notes, one record per student) and `test_integration_stack.py::test_fused_face_plus_voice_session_is_saved_with_source_and_confidence` (real DB).
+
+## Phase 9 tests
+`test_forecast.py` (brute-force probability check, boundary, risk ordering, recency, backtest calibration), `test_trends.py`, `test_anomalies.py` (each detector with positive and negative cases, no input mutation), `test_db_recognition_stats.py` (0006 whitelist/ownership), `test_ui_analytics.py` (charts, teacher/student/admin pages), and `test_integration_stack.py::test_analytics_end_to_end_with_isolation` (real JWT/RLS).
+
+## Phase 10 tests
+`test_assistant.py` (schema validation incl. NaN/bool/unknown keys, role gates, identity-from-principal, subject resolution, routing, exact answers, rate limit, scripted-LLM loop incl. cross-role/injection attempts and bounded rounds, Anthropic adapter with a fake module, safe error text), `test_ui_assistant.py` (chat panel, logout clears history), and `test_integration_stack.py::test_assistant_answers_are_scoped_by_the_database`.

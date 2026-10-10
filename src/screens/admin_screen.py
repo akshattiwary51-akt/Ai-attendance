@@ -6,7 +6,8 @@ import streamlit as st
 
 from src.components.footer import footer_dashboard
 from src.components.header import header_dashboard
-from src.services import admin_service
+from src.screens.teacher_analytics import show_anomalies
+from src.services import admin_service, analytics_service
 from src.ui.auth_forms import login_form
 from src.ui.base_layout import style_background_dashboard, style_base_layout
 from src.ui.feedback import show_error
@@ -84,7 +85,7 @@ def _dashboard() -> None:
     kpi_row([("Sessions today", ov["sessions_today"]), ("Classes attended", ov["attended"]), ("Records counted", ov["conducted"]),
              ("Average attendance", f"{float(avg):g}%" if avg is not None else "—")])
 
-    t_pending, t_teachers, t_students, t_audit = st.tabs(["Pending approvals", "Teachers", "Students", "Audit log"])
+    t_pending, t_teachers, t_students, t_anomalies, t_audit = st.tabs(["Pending approvals", "Teachers", "Students", "Anomalies", "Audit log"])
     with t_pending:
         if not pending:
             st.success("No teacher accounts are waiting for approval.")
@@ -97,6 +98,11 @@ def _dashboard() -> None:
         _user_table("TEACHER", teachers, "teacher_id")
     with t_students:
         _user_table("STUDENT", students, "student_id")
+    with t_anomalies:
+        try:
+            show_anomalies(analytics_service.admin_anomalies(), "No unusual patterns detected across the system.")
+        except AppError as exc:
+            show_error(exc)
     with t_audit:
         if not audit:
             st.info("No audit entries yet.")

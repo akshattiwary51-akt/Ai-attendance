@@ -27,6 +27,7 @@ def combined_attendance_dialog(subject_id: int, images: list):
                     face = recognition_service.analyze_photos(images, roster)
                     voice = recognition_service.analyze_voice(audio.getvalue(), roster)
                     result = fusion_service.fuse(roster, face, voice)
+                    session_service.record_recognition_stats(teacher_id, session["session_id"], recognition_service.face_stats(face))
                     rows, records = fusion_service.rows_and_records(roster, result)
                     st.session_state.combined_attendance_results = (pd.DataFrame(rows), records, session["session_id"], result.notes)
             except AppError as exc:

@@ -209,6 +209,16 @@ def analyze_photos(images: Iterable[Image.Image], roster: list[dict], engine: Fa
     return result
 
 
+def face_stats(a: "PhotoAnalysis") -> dict:
+    return {"faces": len(a.faces), "recognized": a.count(RECOGNIZED), "unknown": a.count(UNKNOWN), "ambiguous": a.count(AMBIGUOUS),
+            "low_quality": a.count(LOW_QUALITY), "too_small": a.count(TOO_SMALL)}
+
+
+def voice_stats(a: "VoiceAnalysis") -> dict:
+    return {"segments": len(a.segments), "recognized": a.count(RECOGNIZED), "unknown": a.count(UNKNOWN), "ambiguous": a.count(AMBIGUOUS),
+            "low_quality": a.count(LOW_QUALITY)}
+
+
 def detect_faces_in_photos(images: Iterable[Image.Image], roster: list[dict]) -> dict[int, Detection]:
     return analyze_photos(images, roster).detections
 

@@ -4,13 +4,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import Path
-
-from dotenv import load_dotenv
 
 from src.utils.errors import ConfigurationError
-
-load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 
 def _read(name: str, default: str | None = None) -> str | None:
@@ -60,6 +55,10 @@ class Settings:
     fusion_voice_weight: float      # how much a voice match counts relative to a face match (0..1)
     fusion_review_below: float      # a single-modality match below this confidence is flagged for review
     fusion_voice_only: str          # voice-only match in a combined session: "review" (mark + flag) | "accept" | "reject"
+    assistant_mode: str             # "rules" (no external service) or "llm" (Anthropic API, opt-in)
+    assistant_model: str
+    anthropic_api_key: str
+    assistant_rate_per_hour: int
     liveness_mode: str              # "challenge" (random movement challenge at enrolment) or "off"
     classroom_min_quality: float    # classroom faces scoring below this (0-100) are not auto-marked
 
@@ -79,6 +78,10 @@ def get_settings() -> Settings:
         fusion_voice_weight=min(1.0, max(0.0, _float("FUSION_VOICE_WEIGHT", 0.6))),
         fusion_review_below=_float("FUSION_REVIEW_BELOW", 0.6),
         fusion_voice_only=(_read("FUSION_VOICE_ONLY", "review") or "review").lower(),
+        assistant_mode=(_read("ASSISTANT_MODE", "rules") or "rules").lower(),
+        assistant_model=_read("ASSISTANT_MODEL", "claude-sonnet-5-5") or "claude-sonnet-5-5",
+        anthropic_api_key=_read("ANTHROPIC_API_KEY", "") or "",
+        assistant_rate_per_hour=int(_float("ASSISTANT_RATE_PER_HOUR", 30)),
         liveness_mode=(_read("LIVENESS_MODE", "challenge") or "challenge").lower(),
         classroom_min_quality=_float("CLASSROOM_MIN_QUALITY", 35.0),
         voice_threshold=_float("VOICE_THRESHOLD", 0.65),

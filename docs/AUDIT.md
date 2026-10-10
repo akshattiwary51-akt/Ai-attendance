@@ -83,3 +83,9 @@ Voice previously kept one template per student, matched every segment greedily t
 
 ## Phase 8 notes
 Before, a session was either face or voice with no way to combine them and no cross-check. Fusion cannot link a voice segment to a specific face in the photo (no speaker-to-face association), so it fuses per student, not per person-in-the-room.
+
+## Phase 9 notes
+Previously there were no analytics beyond a percentage. Limits: forecasts assume a student's future behaviour resembles their recent past (a student about to drop out or change schedule is invisible to it); the anomaly thresholds are defaults chosen without real data and may over/under-flag - tune `Thresholds`.
+
+## Phase 10 notes
+Threats considered: the user asking about another person (no tool takes an identity); a hijacked model calling teacher tools as a student (role gate re-checked per call); prompt injection through subject/student names (sanitised, treated as data, cannot widen access); arbitrary SQL (no SQL path exists); data leaving the system (only in opt-in LLM mode).

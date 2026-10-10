@@ -18,6 +18,10 @@ def complete(session_id: int, records: list[dict]) -> int:
     return int(call_rpc("complete_attendance_session", {"p_session_id": session_id, "p_records": records}))
 
 
+def set_recognition_stats(session_id: int, stats: dict) -> None:
+    call_rpc("set_session_recognition_stats", {"p_session_id": session_id, "p_stats": stats})
+
+
 def cancel(session_id: int) -> None:
     call_rpc("cancel_attendance_session", {"p_session_id": session_id})
 

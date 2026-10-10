@@ -5,13 +5,16 @@ from functools import partial
 
 import streamlit as st
 
+from src.components.assistant_chat import assistant_chat
 from src.components.dialog_enroll import enroll_dialog
 from src.components.footer import footer_dashboard
 from src.components.header import header_dashboard
 from src.components.subject_card import subject_card
-from src.services import auth_service, dashboard_service, enrollment_service, recognition_service
+from src.screens.teacher_analytics import RISK_TEXT
+from src.services import analytics_service, auth_service, dashboard_service, enrollment_service, recognition_service
 from src.ui.auth_forms import login_form
 from src.ui.base_layout import style_background_dashboard, style_base_layout
+from src.ui import charts
 from src.ui.feedback import show_error
 from src.ui.widgets import empty_state, kpi_row, progress_html, risk_badge_html, standing_message
 from src.utils.html import esc
@@ -75,6 +78,36 @@ def _voice_samples_panel() -> None:
             st.rerun()
 
 
+def _forecast_section(student_id: int) -> None:
+    """Personal trend, subject comparison and a plain-language forecast for each subject."""
+    try:
+        sa = analytics_service.student_analytics(student_id)
+    except AppError as exc:
+        show_error(exc)
+        return
+    st.divider()
+    st.header("Trends and forecast")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("Your weekly attendance")
+        chart = charts.trend_line(sa.weekly)
+        st.altair_chart(chart, width="stretch") if chart is not None else st.info("Your trend appears after your first recorded classes.")
+    with c2:
+        st.subheader("Subjects compared")
+        chart = charts.comparison_bars(sa.subject_comparison)
+        st.altair_chart(chart, width="stretch") if chart is not None else st.info("No classes recorded yet.")
+    st.subheader("What to expect over the next month")
+    st.caption("A statistical estimate from your own attendance so far, not a promise. The more classes recorded, the more reliable it is.")
+    for sub, f in sa.forecasts:
+        if f.risk == "NO_DATA":
+            continue
+        with st.expander(f"{sub['name']}: {RISK_TEXT.get(f.risk, f.risk)} · {f.prob_below_target:.0%} chance of ending below {f.target:g}%", expanded=f.risk == "HIGH"):
+            st.markdown(f"Expected attendance at the end of the period: **{f.expected_pct:g}%** (likely between {f.interval_pct[0]:g}% and {f.interval_pct[1]:g}%). "
+                        f"Confidence: **{f.confidence}**.")
+            for reason in f.reasons:
+                st.markdown(f"- {reason}")
+
+
 def student_dashboard() -> None:
     student = st.session_state.student_data
     student_id = student["student_id"]
@@ -132,6 +165,10 @@ def student_dashboard() -> None:
                 stats=[("📅", "Total", standing.conducted), ("✅", "Attended", standing.attended)],
                 footer_callback=partial(_unenroll_button, student_id, sub), body_html=body,
             )
+    _forecast_section(student_id)
+    st.divider()
+    st.header("Ask the attendance assistant")
+    assistant_chat("STUDENT")
     footer_dashboard()
 
 

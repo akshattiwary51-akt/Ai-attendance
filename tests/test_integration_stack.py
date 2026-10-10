@@ -413,3 +413,88 @@ def test_fused_face_plus_voice_session_is_saved_with_source_and_confidence(schoo
     rows = {n: (st, src, c) for n, st, src, c in cur.fetchall()}
     assert rows["Asha"][:2] == ("PRESENT", "Face+Voice") and rows["Asha"][2] > 0.9
     assert rows["Chen"][:2] == ("PRESENT", "Voice") and rows["Bilal"][:2] == ("PRESENT", "Face")
+
+
+# ═════════════════════════ Phase 9: analytics, forecasts, anomalies over RLS ═════════════════════════
+def _session(school, present_names, stats=None):
+    t1, sid = school["t1"], school["subject_id"]
+    with as_(t1):
+        roster = enrollment_service.subject_roster(sid)
+        s = session_service.get_or_start(t1["user"]["teacher_id"], sid, "FACE")
+        if stats:
+            session_service.record_recognition_stats(t1["user"]["teacher_id"], s["session_id"], stats)
+        _, records = att.build_attendance_rows(roster, {r["student_id"]: Detection(r["student_id"], "P", 0.9) for r in roster if r["name"] in present_names})
+        session_service.confirm(t1["user"]["teacher_id"], s["session_id"], records)
+        return s["session_id"]
+
+
+def test_analytics_end_to_end_with_isolation(school):
+    from src.services import analytics_service as an_s
+    bad = {"faces": 10, "unknown": 5}
+    for names in ({"Asha", "Bilal"}, {"Asha"}, {"Asha"}, {"Asha", "Chen"}, {"Asha"}, {"Asha"}):
+        _session(school, names, bad)
+    tid, sid = school["t1"]["user"]["teacher_id"], school["subject_id"]
+    with as_(school["t1"]):
+        ta = an_s.teacher_analytics(tid, sid, "week")
+        assert ta.participation["sessions"] == 6 and ta.class_average == 44.4 and ta.highest["name"] == "Asha" and ta.highest["percentage"] == 100.0
+        assert ta.lowest["percentage"] <= 20 and sum(b["count"] for b in ta.distribution) == 3
+        assert len(ta.heatmap) == 3 * 6 and ta.totals["present"] == 8
+        by = {f["name"]: f["forecast"] for f in ta.forecasts}
+        assert by["Asha"].risk == "LOW" and by["Chen"].risk == "HIGH" and ta.forecasts[0]["forecast"].risk == "HIGH"
+        flags = an_s.teacher_anomalies(tid)
+        assert any(a.code == "RECOGNITION_FAILURES" and a.evidence.get("repeated") for a in flags)          # 6 sessions with 50% unknown faces
+        assert an_s.subject_comparison(tid)[0]["percentage"] == 44.4
+    with as_(school["t2"]):
+        t2 = school["t2"]["user"]["teacher_id"]
+        with pytest.raises(NotFoundError):
+            an_s.teacher_analytics(t2, sid)
+        assert an_s.teacher_anomalies(t2) == []
+    asha = school["students"]["Asha"]["user"]["student_id"]
+    with as_(school["students"]["Asha"]):
+        sa = an_s.student_analytics(asha)
+        sub, f = sa.forecasts[0]
+        assert f.conducted == 6 and f.current_pct == 100.0 and f.risk == "LOW" and sa.weekly and sa.subject_comparison[0]["percentage"] == 100.0
+    with as_(school["students"]["Chen"]):
+        _, f = an_s.student_analytics(school["students"]["Chen"]["user"]["student_id"]).forecasts[0]
+        assert f.conducted == 6 and f.risk == "HIGH" and f.consecutive_absences == 2 and any("below" in r for r in f.reasons)
+    with as_(school["students"]["Dev"]):
+        assert an_s.student_analytics(school["students"]["Dev"]["user"]["student_id"]).forecasts == []
+    with as_(school["admin"]):
+        assert any(a.code == "RECOGNITION_FAILURES" for a in an_s.admin_anomalies())
+    from src.repositories import analytics_repository as ar
+    with as_(school["students"]["Dev"]):                                    # not enrolled anywhere: sees no sessions, no records
+        assert ar.sessions_detail([sid]) == [] and ar.records_for_sessions([1, 2, 3]) == []
+    with as_(school["students"]["Bilal"]):                                  # sees sessions he has a record in, but only his own records
+        assert {r["student_id"] for r in ar.records_for_sessions([1, 2, 3, 4, 5, 6])} == {school["students"]["Bilal"]["user"]["student_id"]}
+
+
+# ═════════════════════════ Phase 10: assistant over real JWT / RLS ═════════════════════════
+def test_assistant_answers_are_scoped_by_the_database(school):
+    from src.services import assistant_service as asst
+    for names in ({"Asha", "Bilal"}, {"Asha"}, {"Asha", "Chen"}, {"Asha"}):
+        _session(school, names)
+    S = school["students"]
+    with as_(S["Asha"]):
+        a = asst.ask("What is my attendance?")
+        assert "Overall you have attended 4 of 4 classes (100%)" in a.text and "DSA" in a.text
+        assert "can miss up to" in asst.ask("Can I miss 1 more DSA class?").text
+    with as_(S["Bilal"]):
+        b = asst.ask("What is my attendance?")
+        assert "1 of 4 classes (25%)" in b.text and "100%" not in b.text                  # his own numbers, never Asha's
+        assert asst.ask("Can I miss 1 more DSA class?").text.startswith("No")
+        assert "Which students" not in asst.ask("Which students are below 75%?").text      # no teacher tool for a student
+    with as_(S["Dev"]):                                                                    # not enrolled anywhere
+        assert "No classes have been recorded" in asst.ask("What is my attendance?").text
+        assert "Which subject" in asst.ask("Can I miss 2 DSA classes?").text
+    with as_(school["t1"]):
+        t = asst.ask("Which students are below 75%?")
+        assert "Bilal" in t.text and "Chen" in t.text and "Asha" not in t.text and "Dev" not in t.text
+        m = asst.ask("Which students missed the last 1 classes in DSA1?").text
+        assert "Bilal" in m and "Chen" in m and "Asha" not in m                            # only Asha was present in the last class
+        assert "4 sessions" in asst.ask("Show attendance for DSA1").text
+    with as_(school["t2"]):                                                                # another teacher: sees none of T1's data
+        assert "Which subject" in asst.ask("Show attendance for DSA1").text                # T2 owns no subject called DSA1
+        assert "No student is below" in asst.ask("Which students are below 75%?").text
+    with as_(school["admin"]):
+        with pytest.raises(AuthorizationError):
+            asst.ask("anything")

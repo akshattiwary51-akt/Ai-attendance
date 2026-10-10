@@ -30,6 +30,7 @@ def voice_attendance_dialog(selected_subject_id):
                         st.error("No enrolled students have voice profiles registered")
                         return
                     rows, records = attendance_service.build_attendance_rows(roster, analysis.detections)
+                    session_service.record_recognition_stats(teacher_id, session["session_id"], recognition_service.voice_stats(analysis))
                     st.session_state.voice_attendance_results = (pd.DataFrame(rows), records, session["session_id"], analysis.notes())
             except AppError as exc:
                 show_error(exc)

@@ -5,7 +5,7 @@ import pandas as pd
 
 from src.repositories import session_repository
 from src.services.attendance_service import ATTENDED, COUNTED, STATUS_LABEL
-from src.utils.errors import AuthorizationError, ConflictError, NotFoundError, ValidationError
+from src.utils.errors import AppError, AuthorizationError, ConflictError, NotFoundError, ValidationError
 from src.utils.logging import get_logger, log_event
 from src.utils.timefmt import format_local
 
@@ -63,6 +63,14 @@ def confirm(teacher_id: int, session_id: int, records: list[dict]) -> int:
         raise
     log_event(log, "attendance_confirmed", session_id=session_id, inserted=inserted)
     return inserted
+
+
+def record_recognition_stats(teacher_id: int, session_id: int, stats: dict) -> None:
+    """Best effort: statistics help anomaly detection but must never block taking attendance."""
+    try:
+        session_repository.set_recognition_stats(session_id, {k: int(v) for k, v in stats.items()})
+    except AppError as exc:
+        log.warning("recognition_stats_not_saved session_id=%s detail=%s", session_id, type(exc).__name__)
 
 
 def discard(teacher_id: int, session_id: int) -> None:

@@ -5,10 +5,7 @@ from src.config import settings as settings_module
 
 @pytest.fixture(autouse=True)
 def _fresh_settings(monkeypatch):
-    for var in (
-        "SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_KEY",
-        "FACE_THRESHOLD", "VOICE_THRESHOLD", "APP_TIMEZONE", "MAX_UPLOAD_MB",
-    ):
+    for var in ("SUPABASE_URL", "SUPABASE_KEY", "FACE_THRESHOLD", "VOICE_THRESHOLD", "APP_TIMEZONE", "MAX_UPLOAD_MB"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.delenv("REQUIRE_TEACHER_APPROVAL", raising=False)
     settings_module.get_settings.cache_clear()
