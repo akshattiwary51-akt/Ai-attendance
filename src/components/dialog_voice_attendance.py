@@ -24,13 +24,13 @@ def voice_attendance_dialog(selected_subject_id):
                         st.warning("No students enrolled in this course")
                         return
                     session = session_service.get_or_start(teacher_id, selected_subject_id, "VOICE")
-                    detections, with_voice = recognition_service.detect_speakers(audio_data.getvalue(), roster)
-                    if with_voice == 0:
+                    analysis = recognition_service.analyze_voice(audio_data.getvalue(), roster)
+                    if analysis.with_voice == 0:
                         session_service.discard(teacher_id, session["session_id"])
                         st.error("No enrolled students have voice profiles registered")
                         return
-                    rows, records = attendance_service.build_attendance_rows(roster, detections)
-                    st.session_state.voice_attendance_results = (pd.DataFrame(rows), records, session["session_id"])
+                    rows, records = attendance_service.build_attendance_rows(roster, analysis.detections)
+                    st.session_state.voice_attendance_results = (pd.DataFrame(rows), records, session["session_id"], analysis.notes())
             except AppError as exc:
                 show_error(exc)
 

@@ -27,9 +27,21 @@ def students_in_subject(subject_id: int) -> list[dict]:
     return [r["students"] for r in rows if r.get("students")]
 
 
+def rosters(subject_ids: list[int]) -> list[dict]:
+    """[{subject_id, students: {student_id, name}}] for several subjects at once (teacher scope via RLS)."""
+    from src.repositories._base import chunked
+    rows: list[dict] = []
+    for ids in chunked(subject_ids):
+        rows += fetch_all(
+            lambda ids=ids: table("enrollments").select("subject_id, students!inner(student_id, name)").in_("subject_id", ids).eq("students.is_active", True).order("enrollment_id"),
+            "enrollment.rosters",
+        )
+    return rows
+
+
 def subjects_of_student(student_id: int) -> list[dict]:
     rows = fetch_all(
-        lambda: table("enrollments").select("subjects(subject_id, subject_code, name, section)").eq("student_id", student_id).order("subject_id"),
+        lambda: table("enrollments").select("subjects(subject_id, subject_code, name, section, target_percent)").eq("student_id", student_id).order("subject_id"),
         "enrollment.subjects_of_student",
     )
     return [r["subjects"] for r in rows if r.get("subjects")]

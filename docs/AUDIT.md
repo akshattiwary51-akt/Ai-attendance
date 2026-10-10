@@ -68,3 +68,18 @@ dlib/Resemblyzer models, UI design/dashboards. Phases 4–8.
 
 ## Not verified in this environment
 No Supabase project, dlib, `face_recognition_models`, librosa or Resemblyzer were available. Those paths are covered by unit tests of the pure logic and mocked services, **not** exercised end-to-end. Run the app against your Supabase project and a few real photos before relying on it.
+
+## Phase 4 notes
+Home-page text was unreadable in dark mode (fixed text colour on a fixed light panel); student percentages were computed client-side from raw rows (now from DB views); admin metrics came from list lengths (now `admin_overview`). Known limitation: dashboards read all rows for the caller's subjects (fine for classroom scale; paginate/aggregate in SQL for very large deployments).
+
+## Phase 5 notes
+Observed on the same test photo: the dlib HOG detector reported a second "face" (a false positive); the SCRFD detector reported exactly one. Previously a single global `FACE_THRESHOLD` (Euclidean) was applied regardless of model, and the nearest student was accepted if within it even when a different student was nearly as close; now the margin rule marks such cases AMBIGUOUS instead of guessing. Gallery loading no longer mixes models.
+
+## Phase 6 notes
+Thresholds (blur 40, brightness 60-200, min side 80 px) were calibrated on one sample photograph, not on your cameras: tune with real captures (see the Phase 12 evaluation utility). Liveness is a deterrent, not anti-spoofing certification.
+
+## Phase 7 notes
+Voice previously kept one template per student, matched every segment greedily to the nearest student (no margin, no quality check) and could mark the wrong student for any similar voice. Now: multi-sample, margin, quality gates. Not solved: replay attacks.
+
+## Phase 8 notes
+Before, a session was either face or voice with no way to combine them and no cross-check. Fusion cannot link a voice segment to a specific face in the photo (no speaker-to-face association), so it fuses per student, not per person-in-the-room.

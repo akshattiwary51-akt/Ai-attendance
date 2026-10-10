@@ -10,6 +10,7 @@ from src.services import admin_service
 from src.ui.auth_forms import login_form
 from src.ui.base_layout import style_background_dashboard, style_base_layout
 from src.ui.feedback import show_error
+from src.ui.widgets import kpi_row
 from src.utils.errors import AppError
 from src.utils.session import logout
 from src.utils.timefmt import format_local
@@ -73,8 +74,15 @@ def _dashboard() -> None:
         show_error(exc)
         return
     pending = [t for t in teachers if not t["is_active"]]
-    k1, k2, k3 = st.columns(3)
-    k1.metric("Teachers", len(teachers)); k2.metric("Students", len(students)); k3.metric("Pending approvals", len(pending))
+    try:
+        ov = admin_service.overview()
+    except AppError as exc:
+        show_error(exc)
+        return
+    avg = ov.get("average_attendance")
+    kpi_row([("Teachers", ov["teachers"]), ("Students", ov["students"]), ("Pending approvals", ov["pending_teachers"]), ("Subjects", ov["subjects"])])
+    kpi_row([("Sessions today", ov["sessions_today"]), ("Classes attended", ov["attended"]), ("Records counted", ov["conducted"]),
+             ("Average attendance", f"{float(avg):g}%" if avg is not None else "—")])
 
     t_pending, t_teachers, t_students, t_audit = st.tabs(["Pending approvals", "Teachers", "Students", "Audit log"])
     with t_pending:

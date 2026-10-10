@@ -10,22 +10,28 @@ from src.components.dialog_add_photo import add_photos_dialog
 from src.components.dialog_attendance_results import attendance_result_dialog
 from src.components.dialog_create_subject import create_subject_dialog
 from src.components.dialog_share_subject import share_subject_dialog
+from src.components.dialog_combined_attendance import combined_attendance_dialog
 from src.components.dialog_voice_attendance import voice_attendance_dialog
 from src.components.footer import footer_dashboard
 from src.components.header import header_dashboard
 from src.components.subject_card import subject_card
 from src.screens.teacher_auth import teacher_screen_login, teacher_screen_register
+from src.screens.teacher_insights import subject_detail_view, teacher_tab_dashboard, teacher_tab_settings, teacher_tab_students
 from src.screens.teacher_sessions import teacher_tab_attendance_records
 from src.services import attendance_service, enrollment_service, recognition_service, session_service, subject_service
 from src.ui.base_layout import style_background_dashboard, style_base_layout
 from src.ui.feedback import show_error
+from src.ui.widgets import empty_state
 from src.utils.errors import AppError
 from src.utils.session import logout
 
 TABS = {
+    "dashboard": ("Dashboard", ":material/dashboard:"),
+    "manage_subjects": ("Subjects", ":material/book_ribbon:"),
+    "students": ("Students", ":material/groups:"),
     "take_attendance": ("Take Attendance", ":material/ar_on_you:"),
-    "manage_subjects": ("Manage Subjects", ":material/book_ribbon:"),
-    "attendance_records": ("Attendance Records", ":material/cards_stack:"),
+    "attendance_records": ("Sessions", ":material/cards_stack:"),
+    "settings": ("Settings", ":material/settings:"),
 }
 
 
@@ -53,7 +59,7 @@ def teacher_dashboard() -> None:
             st.rerun()
 
     st.space()
-    st.session_state.setdefault("current_teacher_tab", "take_attendance")
+    st.session_state.setdefault("current_teacher_tab", "dashboard")
     for col, (key, (label, icon)) in zip(st.columns(len(TABS)), TABS.items()):
         with col:
             active = st.session_state.current_teacher_tab == key
@@ -62,7 +68,8 @@ def teacher_dashboard() -> None:
                 st.rerun()
     st.divider()
 
-    {"take_attendance": teacher_tab_take_attendance, "manage_subjects": teacher_tab_manage_subjects, "attendance_records": teacher_tab_attendance_records}[
+    {"dashboard": teacher_tab_dashboard, "manage_subjects": teacher_tab_manage_subjects, "students": teacher_tab_students,
+     "take_attendance": teacher_tab_take_attendance, "attendance_records": teacher_tab_attendance_records, "settings": teacher_tab_settings}[
         st.session_state.current_teacher_tab
     ]()
     footer_dashboard()
@@ -117,6 +124,9 @@ def teacher_tab_take_attendance() -> None:
     with c3:
         if st.button("Use Voice Attendance", type="primary", width="stretch", icon=":material/mic:"):
             voice_attendance_dialog(subject_id)
+    if st.button("Combine Face + Voice", width="stretch", icon=":material/merge:", disabled=not images,
+                 help="Use the photos above together with a voice recording for stronger evidence."):
+        combined_attendance_dialog(subject_id, images)
 
 
 def _open_session_banner(teacher_id: int, subject_id: int) -> None:
@@ -140,6 +150,7 @@ def _open_session_banner(teacher_id: int, subject_id: int) -> None:
             return
         st.session_state.attendance_images = st.session_state.get("attendance_images", [])
         st.session_state.voice_attendance_results = None
+        st.session_state.combined_attendance_results = None
         st.rerun()
 
 
@@ -152,12 +163,12 @@ def _run_face_analysis(subject_id: int, images: list) -> None:
             return
         session = session_service.get_or_start(teacher_id, subject_id, "FACE")
         with st.spinner("Deep scanning classroom photos..."):
-            detections = recognition_service.detect_faces_in_photos(images, roster)
-        rows, records = attendance_service.build_attendance_rows(roster, detections)
+            analysis = recognition_service.analyze_photos(images, roster)
+        rows, records = attendance_service.build_attendance_rows(roster, analysis.detections)
     except AppError as exc:
         show_error(exc)
         return
-    attendance_result_dialog(pd.DataFrame(rows), records, session["session_id"])
+    attendance_result_dialog(pd.DataFrame(rows), records, session["session_id"], analysis.notes())
 
 
 def _share_button(subject: dict) -> None:
@@ -179,7 +190,7 @@ def teacher_tab_manage_subjects() -> None:
     if subjects is None:
         return
     if not subjects:
-        st.info("No subjects found. Create one above.")
+        empty_state("No subjects found", "Create one with the button above.")
         return
     for sub in subjects:  # every subject is rendered (the original rendered only the last one)
         subject_card(
@@ -189,3 +200,5 @@ def teacher_tab_manage_subjects() -> None:
             stats=[("🫂", "Students", sub["total_students"]), ("🕰️", "Classes", sub["total_classes"])],
             footer_callback=partial(_share_button, sub),
         )
+        with st.expander(f"Details: {sub['name']}"):
+            subject_detail_view(sub["subject_id"])

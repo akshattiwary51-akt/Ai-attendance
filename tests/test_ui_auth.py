@@ -5,7 +5,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 from src.repositories import (
-    admin_repository, attendance_repository, enrollment_repository, profile_repository, session_repository, subject_repository,
+    admin_repository, analytics_repository, attendance_repository, enrollment_repository, profile_repository, session_repository, subject_repository,
 )
 from src.security.auth_provider import set_auth_provider
 from tests.fakes import FakeAuthProvider
@@ -99,10 +99,23 @@ def admin_state():
     return dict(login_type="admin", admin_data={"name": "Root"}, auth={**AUTH, "role": "ADMIN", "teacher_id": None})
 
 
+def kpi(at, label):
+    """Value shown in the KPI card with this label."""
+    import re
+    for m in at.markdown:
+        if f'class="sc-kpi-label">{label}<' in m.value:
+            return re.search(r'class="sc-kpi-value">([^<]*)<', m.value).group(1)
+    raise AssertionError(f"no KPI {label!r}")
+
+
 def stub_admin(monkeypatch, teachers):
     monkeypatch.setattr(admin_repository, "list_teachers", lambda: teachers)
     monkeypatch.setattr(admin_repository, "list_students", lambda: [])
     monkeypatch.setattr(admin_repository, "recent_audit", lambda limit=200: [])
+    pending = sum(1 for t in teachers if not t["is_active"])
+    monkeypatch.setattr(analytics_repository, "admin_overview", lambda tz: {
+        "teachers": len(teachers), "pending_teachers": pending, "students": 0, "subjects": 0, "sessions_today": 0,
+        "attended": 0, "conducted": 0, "average_attendance": None})
 
 
 def test_admin_can_approve_a_pending_teacher(provider, monkeypatch):
@@ -110,7 +123,7 @@ def test_admin_can_approve_a_pending_teacher(provider, monkeypatch):
     stub_admin(monkeypatch, [{"teacher_id": 7, "name": "New T", "email": "n@x.co", "is_active": False, "created_at": "2026-01-01T00:00:00+00:00"}])
     monkeypatch.setattr(admin_repository, "set_active", lambda role, i, a: calls.append((role, i, a)))
     at = fresh(**admin_state())
-    assert not at.exception and at.metric[2].value == "1"                    # 1 pending approval
+    assert not at.exception and kpi(at, "Pending approvals") == "1"
     at.button(key="approve_7").click().run()
     assert calls == [("TEACHER", 7, True)]
 
@@ -132,13 +145,19 @@ def test_non_admin_database_denial_is_shown_not_crashed(provider, monkeypatch):
 # ───── student ─────
 def test_student_dashboard_shows_enrolled_subjects_and_percentage(provider, monkeypatch):
     monkeypatch.setattr(enrollment_repository, "subjects_of_student", lambda sid: [
-        {"subject_id": 1, "subject_code": "DSA1", "name": "DSA", "section": "A"}])
+        {"subject_id": 1, "subject_code": "DSA1", "name": "DSA", "section": "A", "target_percent": 75}])
+    monkeypatch.setattr(analytics_repository, "subject_student_attendance", lambda ids=None: [
+        {"subject_id": 1, "student_id": 9, "attended": 1, "conducted": 2, "excused": 0, "last_session_at": None}])
     monkeypatch.setattr(attendance_repository, "list_for_student", lambda sid: [
-        {"status": "PRESENT", "attendance_sessions": {"subject_id": 1}}, {"status": "ABSENT", "attendance_sessions": {"subject_id": 1}}])
+        {"record_id": 1, "status": "PRESENT", "attendance_sessions": {"subject_id": 1, "started_at": "2026-01-01T00:00:00+00:00"}},
+        {"record_id": 2, "status": "ABSENT", "attendance_sessions": {"subject_id": 1, "started_at": "2026-01-02T00:00:00+00:00"}}])
     at = fresh(login_type="student", student_data={"student_id": 9, "name": "Hamza"}, auth={**AUTH, "role": "STUDENT", "student_id": 9, "teacher_id": None})
     assert not at.exception
     card = next(m.value for m in at.markdown if "<h3" in m.value)
-    assert "50.0" in card and "DSA" in card
+    assert "50" in card and "DSA" in card
+    assert kpi(at, "Overall attendance") == "50%" and kpi(at, "Classes missed") == "1"
+    assert any("Below your attendance target" in w.value for w in at.warning)
+    assert "Attend the next 2 classes" in card              # 1/2 -> needs 2 straight to reach 75%
 
 
 def test_student_registration_without_consent_or_photo_is_blocked(provider):
@@ -149,3 +168,16 @@ def test_student_registration_without_consent_or_photo_is_blocked(provider):
     next(b for b in at.button if b.label == "Create Account").click().run()
     assert not at.exception and any("biometric" in w.value.lower() for w in at.warning)
     assert not provider.users                                                  # nothing was created
+
+
+def test_student_dashboard_prompts_for_a_face_sample_when_none_exists_for_the_model(provider, monkeypatch):
+    from src.repositories import student_repository
+    monkeypatch.setattr(enrollment_repository, "subjects_of_student", lambda sid: [])
+    monkeypatch.setattr(student_repository, "my_face_sample_counts", lambda: {})
+    at = fresh(login_type="student", student_data={"student_id": 9, "name": "Hamza"}, auth={**AUTH, "role": "STUDENT", "student_id": 9, "teacher_id": None})
+    assert not at.exception
+    assert any("no face sample" in w.value for w in at.warning)
+    monkeypatch.setattr(student_repository, "my_face_sample_counts", lambda: {"dlib-resnet-128": 2})
+    at = fresh(login_type="student", student_data={"student_id": 9, "name": "Hamza"}, auth={**AUTH, "role": "STUDENT", "student_id": 9, "teacher_id": None})
+    assert not at.exception and not any("no face sample" in w.value for w in at.warning)
+    assert any("2 of 5" in e.label for e in at.expander)

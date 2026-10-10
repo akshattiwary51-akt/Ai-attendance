@@ -28,7 +28,7 @@ def test_empty_teacher_has_no_subjects(monkeypatch):
 
 def test_create_subject_validation_and_db_duplicate_code(monkeypatch):
     created = []
-    def create(c, n, s, t):
+    def create(c, n, s, t, target=75.0):
         if c == "TAKEN":
             raise DuplicateError("dup")
         created.append(c); return {"subject_id": 2}

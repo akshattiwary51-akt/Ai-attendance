@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from src.repositories import admin_repository
+from src.services import dashboard_service
 from src.utils.errors import ValidationError
 from src.utils.logging import get_logger, log_event
 
@@ -29,3 +30,8 @@ def set_active(role: str, entity_id: int, active: bool) -> None:
         raise ValidationError("role", user_message="Only teachers and students can be activated or deactivated.")
     admin_repository.set_active(role, entity_id, active)
     log_event(log, "admin_set_active", role=role, entity_id=entity_id, active=active)
+
+
+def overview() -> dict:
+    """System KPIs computed in the database (admin only)."""
+    return dashboard_service.admin_overview()

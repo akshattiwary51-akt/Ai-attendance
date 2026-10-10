@@ -5,8 +5,7 @@ from typing import Any, Callable, Iterable, Iterator, Sequence
 
 from src.database.client import get_admin_client, get_client
 from src.utils.errors import (
-    AuthenticationError, AuthorizationError, ConfigurationError, ConflictError, DatabaseError, DuplicateError,
-    NotFoundError, ValidationError,
+    AuthenticationError, AuthorizationError, ConflictError, DatabaseError, DuplicateError, NotFoundError, ValidationError,
 )
 from src.utils.logging import get_logger
 
@@ -29,11 +28,6 @@ def translate(exc: Exception, action: str) -> Exception:
     code = getattr(exc, "code", None)
     message = getattr(exc, "message", "") or ""
     log.error("db_error action=%s code=%s type=%s", action, code, type(exc).__name__)
-    if action == "rpc.provision_account" and code in (401, "401"):
-        return ConfigurationError(
-            "Supabase rejected the service-role credential",
-            user_message="Supabase rejected the server credential. Check SUPABASE_SERVICE_ROLE_KEY in your .env file.",
-        )
     if isinstance(code, str) and code.startswith("PGRST30"):   # PGRST301/303: JWT invalid / expired
         return AuthenticationError(f"{action}: jwt rejected", user_message="Your session expired. Please log in again.")
     if code == "23505":

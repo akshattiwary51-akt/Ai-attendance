@@ -1,68 +1,56 @@
-"""Resemblyzer baseline voice embedding extraction (lazy imports, no UI side effects)."""
+"""Voice backend (Resemblyzer baseline). Heavy imports are lazy so the rest of the app and the tests never need them.
+
+A backend turns encoded audio into a 16 kHz mono float waveform (`decode`) and a waveform into an embedding (`embed`).
+Recognition logic lives in recognition_service and is tested with fake backends."""
 from __future__ import annotations
 
 import io
+from functools import lru_cache
+from typing import Protocol
 
-import streamlit as st
+import numpy as np
 
-from src.config.settings import get_settings
-from src.pipelines.voice_matching import identify_speaker, select_segments
 from src.utils.errors import AIError
 from src.utils.logging import get_logger
 
 log = get_logger(__name__)
 SAMPLE_RATE = 16000
+DEFAULT_MODEL_ID = "resemblyzer"      # known without loading the model
 
 
-@st.cache_resource(show_spinner=False)
-def load_voice_encoder():
-    try:
-        from resemblyzer import VoiceEncoder
-    except ImportError as exc:
-        raise AIError("resemblyzer missing", user_message="Voice recognition models are not installed on this server.") from exc
-    return VoiceEncoder()
+class VoiceBackend(Protocol):
+    model_id: str
+
+    def decode(self, data: bytes) -> np.ndarray: ...
+    def embed(self, wav: np.ndarray) -> np.ndarray: ...
 
 
-def _decode(audio_bytes: bytes):
-    import librosa
+class ResemblyzerBackend:
+    model_id = DEFAULT_MODEL_ID
 
-    try:
-        audio, _ = librosa.load(io.BytesIO(audio_bytes), sr=SAMPLE_RATE)
-    except Exception as exc:  # librosa/soundfile/audioread raise many unrelated types
-        log.error("audio_decode_failed type=%s", type(exc).__name__)
-        raise AIError("audio decode failed", user_message="Could not read that audio recording.") from exc
-    if audio.size == 0:
-        raise AIError("empty audio", user_message="The recording is empty.")
-    return audio
+    def __init__(self):
+        try:
+            from resemblyzer import VoiceEncoder
+        except ImportError as exc:
+            raise AIError("resemblyzer missing", user_message="Voice recognition models are not installed on this server.") from exc
+        self._encoder = VoiceEncoder()
+
+    def decode(self, data: bytes) -> np.ndarray:
+        import librosa
+        try:
+            audio, _ = librosa.load(io.BytesIO(data), sr=SAMPLE_RATE)
+        except Exception as exc:  # librosa/soundfile/audioread raise many unrelated types
+            log.error("audio_decode_failed type=%s", type(exc).__name__)
+            raise AIError("audio decode failed", user_message="Could not read that audio recording.") from exc
+        if audio.size == 0:
+            raise AIError("empty audio", user_message="The recording is empty.")
+        return audio
+
+    def embed(self, wav: np.ndarray) -> np.ndarray:
+        from resemblyzer import preprocess_wav
+        return self._encoder.embed_utterance(preprocess_wav(wav))
 
 
-def get_voice_embedding(audio_bytes: bytes) -> list[float]:
-    from resemblyzer import preprocess_wav
-
-    encoder = load_voice_encoder()
-    wav = preprocess_wav(_decode(audio_bytes))
-    if wav.size < SAMPLE_RATE * get_settings().min_speech_seconds:
-        raise AIError("too little speech", user_message="Not enough speech detected. Please record a longer phrase.")
-    return encoder.embed_utterance(wav).tolist()
-
-
-def process_bulk_audio(audio_bytes: bytes, candidates: dict[int, list[float]], threshold: float | None = None) -> dict[int, float]:
-    """Identify enrolled speakers in a classroom recording -> {student_id: best_similarity}."""
-    import librosa
-    from resemblyzer import preprocess_wav
-
-    settings = get_settings()
-    threshold = settings.voice_threshold if threshold is None else threshold
-    encoder = load_voice_encoder()
-    audio = _decode(audio_bytes)
-    segments = select_segments(librosa.effects.split(audio, top_db=30), SAMPLE_RATE, settings.min_speech_seconds)
-
-    found: dict[int, float] = {}
-    for start, end in segments:
-        wav = preprocess_wav(audio[start:end])
-        if wav.size == 0:
-            continue
-        student_id, score = identify_speaker(encoder.embed_utterance(wav), candidates, threshold)
-        if student_id is not None and score > found.get(student_id, -1.0):
-            found[student_id] = score
-    return found
+@lru_cache(maxsize=1)
+def default_backend() -> VoiceBackend:
+    return ResemblyzerBackend()

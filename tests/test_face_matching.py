@@ -40,3 +40,66 @@ def test_threshold_is_respected_exactly():
     w = A.copy(); w[0] += 0.5
     assert best_match(w, {1: v.tolist()}, 0.5).status == RECOGNIZED
     assert best_match(w, {1: v.tolist()}, 0.49).status == UNKNOWN
+
+
+# ───── Phase 5: metric-aware matching ─────
+import pytest  # noqa: E402
+
+from src.pipelines.face_matching import AMBIGUOUS, MatchPolicy, match_face  # noqa: E402
+
+EUC = MatchPolicy("euclidean", 0.6, margin=0.05)
+COS = MatchPolicy("cosine", 0.4, margin=0.05)
+
+
+def unit(v):
+    return v / np.linalg.norm(v)
+
+
+def test_euclidean_recognised_unknown_and_empty_gallery():
+    assert match_face(noisy(A, 0.01), {1: A.tolist(), 2: B.tolist()}, EUC).student_id == 1
+    far = match_face(rng.normal(size=128), {1: A.tolist()}, EUC)
+    assert far.status == UNKNOWN and far.student_id is None and far.candidate_id == 1
+    e = match_face(A, {}, EUC)
+    assert e.status == UNKNOWN and e.score == 0.0
+
+
+def test_cosine_recognised_and_unknown():
+    a, b = unit(rng.normal(size=512)), unit(rng.normal(size=512))
+    assert match_face(unit(a + rng.normal(scale=0.01, size=512)), {1: [a.tolist()], 2: [b.tolist()]}, COS).student_id == 1
+    assert match_face(unit(rng.normal(size=512)), {1: [a.tolist()]}, COS).status == UNKNOWN
+
+
+def test_cosine_is_scale_invariant():
+    a = rng.normal(size=512)
+    assert match_face(a * 7.0, {1: [(a * 0.3).tolist()]}, COS).student_id == 1
+
+
+def test_margin_makes_close_call_ambiguous_and_zero_margin_does_not():
+    base = rng.normal(size=128)
+    gallery = {1: (base + 0.01).tolist(), 2: (base - 0.01).tolist()}
+    assert match_face(base, gallery, EUC).status == AMBIGUOUS
+    assert match_face(base, gallery, MatchPolicy("euclidean", 0.6, margin=0.0)).status == RECOGNIZED
+
+
+def test_same_student_samples_never_make_a_match_ambiguous():
+    base = rng.normal(size=128)
+    r = match_face(base, {1: [(base + 0.01).tolist(), (base - 0.01).tolist()]}, EUC)     # runner-up is per STUDENT, not per sample
+    assert r.status == RECOGNIZED and r.student_id == 1 and r.runner_up_id is None
+
+
+def test_top_k_averages_samples():
+    base = rng.normal(size=128)
+    gallery = {1: [base.tolist(), (base + 3.0).tolist()]}
+    assert match_face(base, gallery, MatchPolicy("euclidean", 0.6, 0.0, top_k=1)).status == RECOGNIZED
+    assert match_face(base, gallery, MatchPolicy("euclidean", 0.6, 0.0, top_k=2)).status == UNKNOWN   # a poor second sample drags the mean
+
+
+def test_wrong_dimension_gallery_entries_are_skipped_not_crashing():
+    r = match_face(rng.normal(size=128), {1: rng.normal(size=512).tolist()}, EUC)
+    assert r.status == UNKNOWN and r.candidate_id is None
+
+
+@pytest.mark.parametrize("raw,score", [(0.0, 1.0), (0.6, 0.5), (1.2, 0.0), (5.0, 0.0)])
+def test_euclidean_scores_are_normalised(raw, score):
+    from src.pipelines.face_matching import _to_score
+    assert _to_score(raw, EUC) == pytest.approx(score)

@@ -301,3 +301,115 @@ def test_roster_larger_than_postgrest_row_cap_is_fully_returned(school):
     cur.execute("insert into enrollments(student_id, subject_id) select student_id, %s from students where name like 'S%%'", (sid,))
     with as_(school["t1"]):
         assert len(enrollment_service.subject_roster(sid)) == 1203
+
+
+# ═════════ dashboards over real JWT / PostgREST / RLS ═════════
+def _take(school, present_names):
+    t1, sid = school["t1"], school["subject_id"]
+    with as_(t1):
+        roster = enrollment_service.subject_roster(sid)
+        s = session_service.get_or_start(t1["user"]["teacher_id"], sid, "FACE")
+        _, records = att.build_attendance_rows(roster, {r["student_id"]: Detection(r["student_id"], "P") for r in roster if r["name"] in present_names})
+        session_service.confirm(t1["user"]["teacher_id"], s["session_id"], records)
+
+
+def test_dashboards_end_to_end_with_isolation(school):
+    from src.services import dashboard_service as ds
+    _take(school, {"Asha", "Bilal"}); _take(school, {"Asha"})
+    tid, sid = school["t1"]["user"]["teacher_id"], school["subject_id"]
+    with as_(school["t1"]):
+        ov = ds.teacher_overview(tid)
+        assert (ov.total_subjects, ov.total_students, ov.sessions_today) == (1, 3, 2)
+        assert ov.average_attendance == 50.0                      # (2+1+0)/6
+        risks = {r["name"]: r["risk"] for r in ov.at_risk}
+        # Bilal 1/2 and Chen 0/2 are below 75%; Asha 2/2 is on target but cannot miss a class (2/3 < 75%) so she is only "watch"
+        assert risks == {"Bilal": "HIGH", "Chen": "HIGH", "Asha": "MEDIUM"}
+        d = ds.subject_detail(tid, sid)
+        assert [s["name"] for s in d["students"]] == ["Asha", "Bilal", "Chen"] and len(d["trend"]) == 2
+        subject_service.set_target(sid, 90)
+        assert subject_service.list_teacher_subjects(tid)[0]["target_percent"] == 90.0
+    with as_(school["t2"]):
+        t2 = school["t2"]["user"]["teacher_id"]
+        assert ds.teacher_overview(t2).total_subjects == 0
+        with pytest.raises(NotFoundError):
+            ds.subject_detail(t2, sid)
+        with pytest.raises(AuthorizationError):
+            subject_service.set_target(sid, 10)                       # not the owner
+    asha = school["students"]["Asha"]["user"]["student_id"]
+    with as_(school["students"]["Asha"]):
+        so = ds.student_overview(asha)
+        assert (so.attended, so.conducted, so.overall_percentage, so.streak) == (2, 2, 100.0, 2)
+        assert so.subjects[0][1].target == 90.0
+    with as_(school["students"]["Bilal"]):
+        assert ds.student_overview(school["students"]["Bilal"]["user"]["student_id"]).overall_percentage == 50.0
+    with as_(school["students"]["Dev"]):
+        assert ds.student_overview(school["students"]["Dev"]["user"]["student_id"]).subjects == []
+    with as_(school["admin"]):
+        a = admin_service.overview()
+        assert (a["teachers"], a["students"], a["subjects"], a["conducted"]) == (2, 4, 1, 6)
+    with as_(school["t1"]):
+        with pytest.raises(AuthorizationError):
+            admin_service.overview()
+    with as_(school["students"]["Asha"]):
+        with pytest.raises(AuthorizationError):
+            admin_service.overview()
+
+
+# ═════════ face samples + model-aware recognition over real JWT / PostgREST / RLS ═════════
+def test_face_samples_and_model_filtered_recognition_end_to_end(school):
+    import numpy as np
+    from PIL import Image
+    from src.pipelines.face_engine import COSINE, DetectedFace, FaceRecognitionEngine
+    from src.repositories import student_repository
+    from src.services import recognition_service as rs
+
+    sid = school["subject_id"]
+    asha, bilal = school["students"]["Asha"], school["students"]["Bilal"]
+    vec = np.random.default_rng(7).normal(size=512); vec /= np.linalg.norm(vec)
+
+    class Onnxish(FaceRecognitionEngine):
+        model_id, metric, default_threshold, default_margin = "onnx-test", COSINE, 0.4, 0.05
+        def detect_and_embed(self, image):
+            return [DetectedFace((165, 10, 300, 160), vec + np.random.default_rng(1).normal(scale=0.002, size=512))]
+
+    eng = Onnxish()
+    with as_(asha):                                               # Asha adds an onnx-model sample of herself
+        sample = rs.prepare_face_sample(Image.fromarray(__import__("skimage.data").data.astronaut()), eng)
+        student_repository.add_face_sample(sample.embedding, sample.model_id)
+        assert student_repository.my_face_sample_counts() == {"dlib-resnet-128": 1, "onnx-test": 1}
+        assert student_repository.get_face_gallery([asha["user"]["student_id"]]) == {}   # RLS: a student gets no templates, not even their own
+    t1 = school["t1"]
+    with as_(t1):
+        roster = enrollment_service.subject_roster(sid)
+        assert set(student_repository.get_face_gallery([r["student_id"] for r in roster], "onnx-test")) == {asha["user"]["student_id"]}
+        res = rs.analyze_photos([Image.fromarray(__import__("skimage.data").data.astronaut())], roster, eng)
+        assert set(res.detections) == {asha["user"]["student_id"]} and res.detections[asha["user"]["student_id"]].confidence > 0.95
+        # Bilal and Chen only have dlib templates, so under the onnx model they cannot be recognised - and the teacher is told
+        chen = school["students"]["Chen"]["user"]["student_id"]
+        assert set(res.students_without_templates) == {bilal["user"]["student_id"], chen}
+        assert any("no face data" in n for n in res.notes())
+    with as_(school["t2"]):                                                               # another teacher's roster sees nothing
+        assert student_repository.get_face_gallery(None, "onnx-test") == {}
+
+
+def test_fused_face_plus_voice_session_is_saved_with_source_and_confidence(school):
+    from src.services import fusion_service
+    from src.services.recognition_service import PhotoAnalysis, VoiceAnalysis
+    t1, sid = school["t1"], school["subject_id"]
+    ids = {n: school["students"][n]["user"]["student_id"] for n in ("Asha", "Bilal", "Chen")}
+    with as_(t1):
+        roster = enrollment_service.subject_roster(sid)
+        s = session_service.get_or_start(t1["user"]["teacher_id"], sid, "FACE_PLUS_VOICE")
+        assert s["method"] == "FACE_PLUS_VOICE"
+        face = PhotoAnalysis(detections={ids["Asha"]: Detection(ids["Asha"], "Photo 1", 0.9), ids["Bilal"]: Detection(ids["Bilal"], "Photo 1", 0.4)})
+        voice = VoiceAnalysis(detections={ids["Asha"]: Detection(ids["Asha"], "Voice", 0.8), ids["Chen"]: Detection(ids["Chen"], "Voice", 0.9)})
+        result = fusion_service.fuse(roster, face, voice)
+        _, records = fusion_service.rows_and_records(roster, result)
+        assert session_service.confirm(t1["user"]["teacher_id"], s["session_id"], records) == 3
+    by_src = {r["student_id"]: r for r in records}
+    assert by_src[ids["Asha"]]["source"] == "Face+Voice" and by_src[ids["Chen"]]["source"] == "Voice" and by_src[ids["Bilal"]]["source"] == "Face"
+    cur = school["cur"]
+    cur.execute("select s.name, r.status, r.source, r.confidence from attendance_records r join students s using(student_id) order by s.name")
+    rows = {n: (st, src, c) for n, st, src, c in cur.fetchall()}
+    assert rows["Asha"][:2] == ("PRESENT", "Face+Voice") and rows["Asha"][2] > 0.9
+    assert rows["Chen"][:2] == ("PRESENT", "Voice") and rows["Bilal"][:2] == ("PRESENT", "Face")

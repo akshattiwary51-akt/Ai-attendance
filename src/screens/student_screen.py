@@ -9,11 +9,12 @@ from src.components.dialog_enroll import enroll_dialog
 from src.components.footer import footer_dashboard
 from src.components.header import header_dashboard
 from src.components.subject_card import subject_card
-from src.services import attendance_service, auth_service, enrollment_service, recognition_service
-from src.pipelines.voice_pipeline import get_voice_embedding
+from src.services import auth_service, dashboard_service, enrollment_service, recognition_service
 from src.ui.auth_forms import login_form
 from src.ui.base_layout import style_background_dashboard, style_base_layout
 from src.ui.feedback import show_error
+from src.ui.widgets import empty_state, kpi_row, progress_html, risk_badge_html, standing_message
+from src.utils.html import esc
 from src.utils.errors import AppError
 from src.utils.images import load_image
 from src.utils.session import logout
@@ -28,6 +29,50 @@ def _unenroll_button(student_id: int, subject: dict) -> None:
             return
         st.toast(f"Unenrolled from {subject['name']} successfully!")
         st.rerun()
+
+
+def _face_samples_panel() -> None:
+    """Let a student add more face samples (lighting/angle) - more samples make recognition more reliable."""
+    try:
+        model, n = recognition_service.my_face_sample_count()
+    except AppError as exc:
+        show_error(exc)
+        return
+    with st.expander(f"Face recognition samples: {n} of 5", expanded=n == 0):
+        if n == 0:
+            st.warning("You have no face sample for the current recognition model, so you cannot be recognised in class. Add one below.")
+        st.caption("Add photos in different lighting or angles to improve recognition. Only a numeric template is stored, not the photo.")
+        shot = st.camera_input("Take a photo (only you in frame)", key="extra_face_photo") if n < 5 else None
+        if shot and st.button("Save this sample", key="save_face_sample", type="primary"):
+            try:
+                recognition_service.add_my_face_sample(load_image(shot))
+            except AppError as exc:
+                show_error(exc)
+                return
+            st.toast("Face sample saved")
+            st.rerun()
+
+
+def _voice_samples_panel() -> None:
+    """Optional voice samples (up to 5), quality-checked before saving."""
+    try:
+        _, n = recognition_service.my_voice_sample_count()
+    except AppError as exc:
+        show_error(exc)
+        return
+    with st.expander(f"Voice recognition samples: {n} of 5"):
+        st.caption("Optional. Record a clear 3-5 second phrase in a quiet room. Only a numeric template is stored, not the recording. "
+                   "Voice is a weaker signal than your face and can be imitated by a recording, so it is used for attendance only.")
+        clip = st.audio_input("Record a short phrase", key="extra_voice_clip") if n < 5 else None
+        if clip and st.button("Save voice sample", key="save_voice_sample", type="primary"):
+            try:
+                with st.spinner("Checking your recording.."):
+                    recognition_service.add_my_voice_sample(clip.getvalue())
+            except AppError as exc:
+                show_error(exc)
+                return
+            st.toast("Voice sample saved")
+            st.rerun()
 
 
 def student_dashboard() -> None:
@@ -51,26 +96,41 @@ def student_dashboard() -> None:
             enroll_dialog()
     st.divider()
 
+    _face_samples_panel()
+    _voice_samples_panel()
     try:
-        with st.spinner("Loading your enrolled subjects.."):
-            subjects = enrollment_service.student_subjects(student_id)
-            stats_map = attendance_service.get_student_stats(student_id)
+        with st.spinner("Loading your attendance.."):
+            overview = dashboard_service.student_overview(student_id)
     except AppError as exc:
         show_error(exc)
         return
 
-    if not subjects:
-        st.info("You are not enrolled in any subject yet. Use 'Enroll in Subject' or scan your teacher's QR code.")
+    if not overview.subjects:
+        empty_state("You are not enrolled in any subject yet", "Use 'Enroll in Subject' or scan your teacher's QR code.")
+        footer_dashboard()
+        return
+
+    kpi_row([
+        ("Overall attendance", f"{overview.overall_percentage:g}%", f"{overview.attended} of {overview.conducted} classes"),
+        ("Classes missed", overview.missed),
+        ("Current streak", overview.streak, "classes in a row"),
+        ("Status", {"HIGH": "High risk", "MEDIUM": "Watch", "LOW": "On track"}.get(overview.risk, "No data")),
+    ])
+    below = [sub["name"] for sub, standing in overview.subjects if standing.conducted and standing.percentage < standing.target]
+    if below:
+        st.warning("Below your attendance target in: " + ", ".join(below))
+
     cols = st.columns(2)
-    for i, sub in enumerate(subjects):
-        stats = stats_map.get(sub["subject_id"], {"total": 0, "attended": 0, "percentage": 0.0})
+    for i, (sub, standing) in enumerate(overview.subjects):
+        body = (f'<div style="margin-top:10px">{risk_badge_html(standing.risk)} <b>{standing.percentage:g}%</b> '
+                f'<span class="sc-sub">(target {standing.target:g}%)</span></div>'
+                f"{progress_html(standing.percentage, standing.target)}"
+                f'<div class="sc-sub">{esc(standing_message(standing))}</div>')
         with cols[i % 2]:
             subject_card(
-                name=sub["name"],
-                code=sub["subject_code"],
-                section=sub["section"],
-                stats=[("📅", "Total", stats["total"]), ("✅", "Attended", stats["attended"]), ("📊", "% Attendance", stats["percentage"])],
-                footer_callback=partial(_unenroll_button, student_id, sub),
+                name=sub["name"], code=sub["subject_code"], section=sub["section"],
+                stats=[("📅", "Total", standing.conducted), ("✅", "Attended", standing.attended)],
+                footer_callback=partial(_unenroll_button, student_id, sub), body_html=body,
             )
     footer_dashboard()
 
@@ -91,6 +151,13 @@ def _registration_form() -> None:
         password = st.text_input("Password (min 8 characters)", type="password")
         confirm = st.text_input("Confirm password", type="password")
         photo = st.camera_input("Take a clear photo of your face (look at the camera, good light)")
+        photo2 = None
+        if recognition_service.liveness_required():
+            if "liveness_challenge" not in st.session_state:
+                st.session_state.liveness_challenge = recognition_service.new_liveness_challenge()
+            code, instruction = st.session_state.liveness_challenge
+            st.info(f"Liveness check: take a second photo after you follow this instruction - **{instruction}**.")
+            photo2 = st.camera_input("Second photo (liveness check)", key="liveness_photo")
         st.subheader("Optional : Voice Enrollment")
         audio = st.audio_input("Record a short phrase like 'I am present, my name is Akash.'")
         st.info(PRIVACY_NOTICE)
@@ -99,15 +166,17 @@ def _registration_form() -> None:
         if st.button("Create Account", type="primary"):
             try:
                 with st.spinner("Creating your account.."):
-                    face = recognition_service.extract_single_face_embedding(load_image(photo)) if photo else None
-                    if photo and face is None:
-                        st.error("We need exactly one clear face in the photo.")
-                        return
-                    voice = get_voice_embedding(audio.getvalue()) if audio else None
-                    auth_service.register_student(email, name, password, confirm, roll, face, voice, consent)
+                    challenge = st.session_state.get("liveness_challenge", (None, ""))[0]
+                    sample = (recognition_service.prepare_enrollment_sample(load_image(photo), load_image(photo2) if photo2 else None, challenge)
+                              if photo else None)
+                    voice = recognition_service.prepare_voice_sample(audio.getvalue()).embedding if audio else None
+                    auth_service.register_student(email, name, password, confirm, roll, sample.embedding if sample else None, voice, consent,
+                                                  face_model=sample.model_id if sample else "dlib-resnet-128",
+                                                  face_quality=sample.quality if sample else None)
             except AppError as exc:
                 show_error(exc)
                 return
+            st.session_state.pop("liveness_challenge", None)
             st.success("Account created! Log in now. (If email confirmation is enabled, confirm your email first.)")
             st.session_state.student_login_type = "login"
 

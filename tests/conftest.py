@@ -7,12 +7,10 @@ from src.config import settings as settings_module
 def _fresh_settings(monkeypatch):
     for var in (
         "SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_KEY",
-        "REQUIRE_TEACHER_APPROVAL", "FACE_THRESHOLD", "FACE_MARGIN", "FACE_ENGINE", "FACE_TOP_K",
-        "MIN_FACE_PX", "LIVENESS_MODE", "CLASSROOM_MIN_QUALITY", "VOICE_THRESHOLD",
-        "MIN_SPEECH_SECONDS", "MAX_UPLOAD_MB", "MAX_IMAGE_SIDE", "APP_BASE_URL",
-        "APP_TIMEZONE", "ATTENDANCE_TARGET", "RISK_BUFFER",
+        "FACE_THRESHOLD", "VOICE_THRESHOLD", "APP_TIMEZONE", "MAX_UPLOAD_MB",
     ):
         monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv("REQUIRE_TEACHER_APPROVAL", raising=False)
     settings_module.get_settings.cache_clear()
     from src.database import client
     from src.security import principal

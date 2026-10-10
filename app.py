@@ -21,7 +21,7 @@ def main() -> None:
         session.logout()
         st.warning("Your session expired. Please log in again.")
 
-    match st.session_state.get("login_type"):
+    match st.session_state["login_type"]:
         case "teacher":
             teacher_screen()
         case "student":
@@ -33,12 +33,11 @@ def main() -> None:
 
     join_code = st.query_params.get("join-code")
     if join_code:
-        if st.session_state.get("login_type") != "student":
-            st.session_state["login_type"] = "student"
+        if st.session_state.login_type != "student":
+            st.session_state.login_type = "student"
             st.rerun()
         if st.session_state.get("is_logged_in") and st.session_state.get("user_role") == "student":
             auto_enroll_dialog(join_code)
 
 
-if __name__ == "__main__":
-    main()
+main()

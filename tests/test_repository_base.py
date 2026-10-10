@@ -1,7 +1,7 @@
 import pytest
 
 from src.repositories import _base
-from src.utils.errors import ConfigurationError, DatabaseError, DuplicateError
+from src.utils.errors import DatabaseError, DuplicateError
 from tests.conftest import FakeQuery
 
 
@@ -36,12 +36,6 @@ def test_execute_translates_other_errors_without_leaking_details():
     with pytest.raises(DatabaseError) as ei:
         _base.execute(Boom("XX000"), "x")
     assert "boom" not in ei.value.user_message
-
-
-def test_provision_unauthorized_reports_service_credential_configuration():
-    error = _base.translate(Boom(401), "rpc.provision_account")
-    assert isinstance(error, ConfigurationError)
-    assert "SUPABASE_SERVICE_ROLE_KEY" in error.user_message
 
 
 def test_chunked():

@@ -41,7 +41,7 @@ def test_all_subjects_render_not_just_the_last_one(app):
 def test_single_and_zero_subjects(app):
     assert len(cards(app(subjects(1)))) == 1
     at = app([])
-    assert not cards(at) and any("No subjects found" in i.value for i in at.info)
+    assert not cards(at) and any("No subjects found" in m.value for m in at.markdown)
 
 
 def test_subject_names_are_html_escaped(app):

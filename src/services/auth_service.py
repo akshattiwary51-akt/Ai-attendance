@@ -76,7 +76,8 @@ def register_teacher(email: str, name: str, password: str, confirm: str) -> Regi
 
 
 def register_student(email: str, name: str, password: str, confirm: str, roll_number: str | None,
-                     face_embedding: list[float] | None, voice_embedding: list[float] | None, consent: bool) -> Registration:
+                     face_embedding: list[float] | None, voice_embedding: list[float] | None, consent: bool,
+                     face_model: str = "dlib-resnet-128", face_quality: float | None = None) -> Registration:
     email, name = _validate_credentials(email, password, confirm), _clean_name(name)
     if not consent:
         raise ValidationError("consent", user_message="Please accept the biometric data notice to register.")
@@ -85,7 +86,7 @@ def register_student(email: str, name: str, password: str, confirm: str, roll_nu
     roll = (roll_number or "").strip() or None
     if roll and len(roll) > 40:
         raise ValidationError("roll", user_message="Roll number is too long.")
-    _create_account(email, password, "STUDENT", name, roll_number=roll, face=face_embedding, voice=voice_embedding)
+    _create_account(email, password, "STUDENT", name, roll_number=roll, face=face_embedding, voice=voice_embedding, face_model=face_model, face_quality=face_quality)
     return Registration()
 
 

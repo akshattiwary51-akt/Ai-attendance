@@ -7,13 +7,16 @@ from src.utils.errors import AppError
 
 def _reset():
     st.session_state.voice_attendance_results = None
+    st.session_state.combined_attendance_results = None
     st.session_state.attendance_images = []
 
 
-def show_attendance_result(df, records, session_id):
+def show_attendance_result(df, records, session_id, notes=()):
     """Review step: nothing is saved until the teacher confirms."""
     teacher_id = st.session_state.teacher_data["teacher_id"]
     st.write("Please review attendance before confirming.")
+    for note in notes:
+        st.warning(note)
     st.dataframe(df, hide_index=True, width="stretch")
 
     col1, col2 = st.columns(2)
@@ -39,5 +42,5 @@ def show_attendance_result(df, records, session_id):
 
 
 @st.dialog("Attendance Reports")
-def attendance_result_dialog(df, records, session_id):
-    show_attendance_result(df, records, session_id)
+def attendance_result_dialog(df, records, session_id, notes=()):
+    show_attendance_result(df, records, session_id, notes)

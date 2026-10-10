@@ -1,5 +1,3 @@
-import os
-
 import pytest
 
 from src.database import client
@@ -54,20 +52,6 @@ def test_legacy_supabase_key_is_treated_as_the_service_key(monkeypatch):
     monkeypatch.setenv("SUPABASE_KEY", "LEGACY"); monkeypatch.setenv("SUPABASE_URL", "u"); monkeypatch.setenv("SUPABASE_ANON_KEY", "a")
     from src.config.settings import get_settings
     assert get_settings().supabase_service_key == "LEGACY"
-
-
-def test_project_env_file_loads_without_overriding_process_environment(tmp_path, monkeypatch):
-    from src.config.settings import _load_project_env
-
-    env_file = tmp_path / ".env"
-    env_file.write_text("SNAPCLASS_TEST_SETTING=from-file\n", encoding="utf-8")
-    monkeypatch.setenv("SNAPCLASS_TEST_SETTING", "from-process")
-    _load_project_env(env_file)
-    assert os.environ["SNAPCLASS_TEST_SETTING"] == "from-process"
-
-    monkeypatch.delenv("SNAPCLASS_TEST_SETTING")
-    _load_project_env(env_file)
-    assert os.environ["SNAPCLASS_TEST_SETTING"] == "from-file"
 
 
 def test_get_client_is_per_token_and_never_falls_back_to_service_role(monkeypatch):

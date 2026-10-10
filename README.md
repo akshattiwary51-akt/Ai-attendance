@@ -26,7 +26,7 @@ Python **3.12+**. `pip install -r requirements.txt` (dev: `requirements-dev.txt`
 4. Create the first administrator: `python scripts/create_admin.py you@college.edu` (needs the three env vars; prompts for a password).
 5. Teachers register in the app and are **inactive until an admin approves them** (admin console → *Pending approvals*). Students register with email + password, a face photo and a consent tick.
 
-For local development, copy `.env.example` → `.env`; the app loads that file from the project root, without overriding variables already set in the process. For deployment, configure secrets in Streamlit or the hosting provider rather than relying on a local `.env` file. Fill in the Supabase credentials in either configuration.
+Copy `.env.example` → `.env` or `.streamlit/secrets.toml.example` → `.streamlit/secrets.toml` and fill in Supabase credentials.
 Run: `streamlit run app.py` · Test: `pytest` (see [docs/TESTING.md](docs/TESTING.md) for the database-backed suites)
 
 ## Teacher workflow (Phase 2)
@@ -39,3 +39,42 @@ Attendance Records → open a session → correct a record with a mandatory reas
 - All writes to attendance go through `SECURITY DEFINER` functions that read the caller from `auth.uid()` (no client-supplied ids) and write the audit log in the same transaction.
 - The **service-role key is used only** to provision accounts and bootstrap the first admin. It never serves user queries.
 - Face recognition is for *attendance only*. Face is no longer a login credential: a printed photo could impersonate any student until liveness checks exist (Phase 6).
+
+## Phase 4 - Dashboards
+
+- **Student**: overall %, classes missed, streak, status; per-subject progress bar with target marker and plain-language guidance ("you can miss N more classes" / "attend the next N classes to get back to target"). Below-target warning.
+- **Teacher**: tabs Dashboard (KPIs, students needing attention, recent sessions), Subjects (cards + per-subject students/trend/sessions), Students (search + risk filter), Take Attendance, Sessions, Settings (per-subject attendance target).
+- **Admin**: KPI cards from the `admin_overview` function (teachers, students, pending approvals, subjects, sessions today, average attendance).
+- Numbers come from RLS-scoped views (`v_subject_student_attendance`, `v_session_summary`, migration `0003_analytics.sql`); only COMPLETED sessions count; attended = PRESENT+LATE; EXCUSED is neutral. Risk is rule-based and explainable (not ML). Config: `ATTENDANCE_TARGET`, `RISK_BUFFER`.
+- Theme: colours are CSS variables with a dark-mode variant; the home page text contrast was fixed.
+
+## Phase 5 - Face recognition
+
+- **Engine interface** (`src/pipelines/face_engine.py`): `FaceRecognitionEngine.detect_and_embed(image) -> [DetectedFace(box, embedding, det_score)]`. Engines: `dlib` (baseline, HOG + ResNet-128, Euclidean) and `onnx` (SCRFD `det_500m` + ArcFace-family `w600k_mbf`, cosine; numpy + PIL + onnxruntime only). Select with `FACE_ENGINE`.
+- **Templates are model-tagged.** `face_profiles.model` is stored with every sample and galleries are filtered by the active engine's model id - embeddings from different models are never compared. Switching engine therefore means students need new samples (the student dashboard prompts for one; teachers are told how many enrolled students cannot be recognised).
+- **Multi-sample**: up to 5 active samples per student per model (`add_face_sample`, `remove_face_samples`, `my_face_sample_counts`; audited). A student's score is their best sample (or the mean of the best `FACE_TOP_K`).
+- **Match statuses**: `RECOGNIZED`, `UNKNOWN` (nobody within threshold), `AMBIGUOUS` (two *different students* within `FACE_MARGIN` - never marked, reported for manual check), `TOO_SMALL` (below `MIN_FACE_PX`). Per-photo outcomes, photos with no face and unenrolled-for-model students are summarised for the teacher before they confirm. Confidence stored on records is a normalised 0-1 score.
+- **ONNX models** are not in the repo (licence/size). Download the InsightFace `buffalo_sc` pack and put `det_500m.onnx` and `w600k_mbf.onnx` in `ONNX_MODEL_DIR`. Check the licence of the pack for your use (InsightFace pretrained models are for non-commercial research unless licensed).
+- **Not validated**: thresholds are the engines' conventional defaults. I could only test same-person stability on one public photo; there was no multi-person dataset available offline, so false-accept/false-reject rates for your classroom are unmeasured. Calibrate on your own consented data (the evaluation utility arrives in Phase 12).
+
+## Phase 6 - Face quality and liveness
+
+- **Quality gate** (`src/pipelines/face_quality.py`, numpy only): sharpness, brightness, contrast, clipping, face size, cut-off at the frame edge and detector confidence give a 0-100 score and specific user-facing reasons ("The photo is blurry..."). Enrolment photos must pass strictly; the score is stored in `face_profiles.quality_score`.
+- **Classroom photos**: faces that are hopelessly blurry/dark/small (below `CLASSROOM_MIN_QUALITY` or smeared) get status `LOW_QUALITY`: they are **not** auto-marked and the teacher is told to check manually.
+- **Liveness** (`src/pipelines/liveness.py`): at registration (`LIVENESS_MODE=challenge`) the student takes a second photo after a random challenge (closer / farther / higher / lower). We require one face in each photo, the same person, two different pictures, and the requested movement.
+- **Honest limits**: this deters casual spoofing (a still photo or screenshot). It does NOT stop someone who moves a photo/plays a video as asked, or a 3-D mask; no trained anti-spoofing model is bundled. Head pose is not measured (engines expose no landmarks). Add a model behind `LivenessChecker` or verify enrolment in person for high-stakes use. Extra samples added later by a logged-in student are quality-gated but need no challenge (the account is password-authenticated).
+
+## Phase 7 - Voice
+
+- **Backend interface** (`src/pipelines/voice_pipeline.py`): `VoiceBackend.decode/embed`; Resemblyzer is the baseline (lazy import, so the app runs without it).
+- **Audio quality** (`voice_quality.py`, numpy only): speech length, level, clipping and signal-to-noise ratio, with user-facing reasons. Enrolment recordings must pass; classroom segments below quality are `LOW_QUALITY` and never marked.
+- **Segmentation**: energy-based voice activity detection; short gaps bridged, blips dropped, runs longer than 6 s cut into 3 s windows so speakers who talk back to back are matched separately. Segment noise is judged against the whole recording's noise floor.
+- **Matching**: the same threshold + runner-up-margin policy as faces (`VOICE_THRESHOLD`, `VOICE_MARGIN`) -> RECOGNIZED / UNKNOWN / AMBIGUOUS. Ambiguous segments are not marked; the teacher is told.
+- **Multiple samples**: migration `0005_voice_samples.sql` (up to 5 per student per model, quality stored, audited add/remove RPCs, students can count but never read templates). Students add samples from their dashboard.
+- **Limits**: voice is a weaker signal than the face and can be replayed from a recording (no voice anti-spoofing; no spoken-phrase verification). The VAD cannot separate overlapping speakers or reject non-speech noise that is as loud as speech. Resemblyzer was not installed in the development sandbox: the algorithms are tested with a fake encoder and synthetic audio, so real-voice accuracy and thresholds (0.65 / 0.05) are unmeasured - run the Phase 12 evaluation on real recordings before relying on it.
+
+## Phase 8 - Multimodal fusion
+
+"Combine Face + Voice" (Take Attendance) analyses the added photos and a voice recording together (`FACE_PLUS_VOICE` session) and applies explicit rules (`src/services/fusion_service.py`):
+seen + heard = strongest (noisy-OR of the face score and the weighted voice score); seen only = present (a student need not speak); heard only = present but flagged (or accepted/rejected via `FUSION_VOICE_ONLY`); a doubtful face whose nearest student is the one the voice recognised is resolved by the voice and flagged; no evidence = absent. Weak single-modality matches are flagged `⚠ check`. The review table shows source, confidence and the reason for each student; nothing is saved until the teacher confirms, and records can be corrected afterwards (audited).
+**Honest note**: the rules and weights are hand-set, not learned or calibrated - there is no labelled data. The combined number ranks evidence for the teacher; it is not a probability. Tune `FUSION_*` with the Phase 12 evaluation on your own recordings.
