@@ -8,11 +8,11 @@ from src.analytics.anomalies import HIGH, WARN
 from src.services import analytics_service, subject_service
 from src.ui import charts
 from src.ui.feedback import show_error
-from src.ui.widgets import empty_state, kpi_row
+from src.ui.widgets import empty_state, kpi_row, page_header
 from src.utils.errors import AppError
 
 RISK_TEXT = {"HIGH": "High risk", "MEDIUM": "Watch", "LOW": "On track", "NO_DATA": "No data"}
-SEVERITY_TEXT = {"HIGH": "🔴 High", "WARN": "🟠 Warning", "INFO": "🔵 Info"}
+SEVERITY_TEXT = {"HIGH": "✕ High", "WARN": "! Warning", "INFO": "i Info"}
 
 
 def anomaly_table(found) -> pd.DataFrame:
@@ -34,7 +34,7 @@ def _chart(c, fallback="Not enough data yet.") -> None:
 
 def teacher_tab_analytics() -> None:
     teacher_id = st.session_state.teacher_data["teacher_id"]
-    st.header("Analytics")
+    page_header("Analytics", "Attendance trends, rankings, forecasts and unusual patterns for one subject.", ("Teacher", "Analytics"))
     try:
         subjects = subject_service.list_teacher_subjects(teacher_id)
     except AppError as exc:

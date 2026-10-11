@@ -164,6 +164,13 @@ def teacher_anomalies(teacher_id: int) -> list[an.Anomaly]:
     return an.detect(sessions, records, corrections)
 
 
+def admin_activity(granularity: str = "week") -> list[dict]:
+    """System-wide completed-session trend for the admin overview (RLS lets only admins read every session)."""
+    sessions = _summaries(None)
+    sessions.sort(key=lambda s: (s["started_at"], s["session_id"]))
+    return tr.trend(sessions, granularity, local_tz())
+
+
 def admin_anomalies() -> list[an.Anomaly]:
     sessions, records, corrections = _anomaly_inputs(None)
     return an.detect(sessions, records, corrections)

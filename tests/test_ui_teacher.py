@@ -35,7 +35,7 @@ def test_all_subjects_render_not_just_the_last_one(app):
     at = app(subjects(3))
     assert not at.exception
     assert len(cards(at)) == 3
-    assert len([b for b in at.button if b.label.startswith("Share Code")]) == 3   # one distinct share button each
+    assert len([b for b in at.button if b.label.startswith("Share code")]) == 3   # one distinct share button each
 
 
 def test_single_and_zero_subjects(app):
@@ -103,7 +103,7 @@ def test_records_tab_lists_sessions_and_applies_a_correction(app, monkeypatch):
     monkeypatch.setattr(session_repository, "correct", lambda *a: calls.append(a) or 1)
     at = app(subjects(1), tab="attendance_records")
     assert not at.exception and len(at.dataframe) >= 2
-    at.text_input[0].set_value("bus delay")
+    at.text_input(key="corr_reason_3").set_value("bus delay")
     next(b for b in at.button if b.label == "Apply correction").click().run()
     assert calls == [(3, 9, "PRESENT", "bus delay")]                 # first status option is PRESENT
 

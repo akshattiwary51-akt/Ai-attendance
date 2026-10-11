@@ -1,6 +1,5 @@
 # Python 3.12+ required (the original code uses nested same-type quotes in f-strings, PEP 701).
 streamlit>=1.65,<2        # tested on 1.65 (uses st.space, width=, shortcut=)
-python-dotenv>=1.0
 
 numpy>=1.26
 pandas>=2.2

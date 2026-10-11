@@ -70,6 +70,22 @@ def student_overview(student_id: int) -> StudentOverview:
     )
 
 
+def student_history(student_id: int) -> list[dict]:
+    """The student's own records from completed sessions, newest first: [{when, subject_id, subject, code, status}].
+
+    Read through the same RLS-scoped repository as the overview, so only this student's rows can ever appear.
+    """
+    names = {s["subject_id"]: s for s in enrollment_repository.subjects_of_student(student_id)}
+    rows = []
+    for r in attendance_repository.list_for_student(student_id):
+        sess = r["attendance_sessions"]
+        sub = names.get(sess["subject_id"])
+        rows.append({"when": sess["started_at"], "subject_id": sess["subject_id"], "subject": sub["name"] if sub else f"Subject {sess['subject_id']}",
+                     "code": sub["subject_code"] if sub else "", "status": r["status"], "record_id": r["record_id"]})
+    rows.sort(key=lambda r: (r["when"], r["record_id"]), reverse=True)
+    return rows
+
+
 # ───────────────────────── teacher ─────────────────────────
 @dataclass(frozen=True)
 class TeacherOverview:

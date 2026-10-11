@@ -1,7 +1,4 @@
 """SnapClass entry point."""
-import os
-
-from dotenv import load_dotenv
 import streamlit as st
 
 from src.components.dialog_auto_enroll import auto_enroll_dialog
@@ -13,11 +10,11 @@ from src.utils import session
 
 
 def main() -> None:
-    if st.runtime.exists() and "PYTEST_CURRENT_TEST" not in os.environ:
-        load_dotenv()
     st.set_page_config(
-        page_title="SnapClass - Making Attendance faster using AI",
-        page_icon="https://i.ibb.co/YTYGn5qV/logo.png",
+        page_title="SnapClass - AI attendance",
+        page_icon=":material/how_to_reg:",
+        layout="wide",
+        initial_sidebar_state="auto",
     )
     session.install()  # DB access always uses the logged-in user's token (RLS), resolved from session state
     st.session_state.setdefault("login_type", None)

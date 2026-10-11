@@ -26,7 +26,7 @@ Python **3.12+**. `pip install -r requirements.txt` (dev: `requirements-dev.txt`
 4. Create the first administrator: `python scripts/create_admin.py you@college.edu` (needs the three env vars; prompts for a password).
 5. Teachers register in the app and are **inactive until an admin approves them** (admin console → *Pending approvals*). Students register with email + password, a face photo and a consent tick.
 
-Copy `.env.example` → `.env` or `.streamlit/secrets.toml.example` → `.streamlit/secrets.toml` and fill in Supabase credentials. The app loads `.env` automatically when started with `streamlit run app.py`.
+Copy `.env.example` → `.env` or `.streamlit/secrets.toml.example` → `.streamlit/secrets.toml` and fill in Supabase credentials.
 Run: `streamlit run app.py` · Test: `pytest` (see [docs/TESTING.md](docs/TESTING.md) for the database-backed suites)
 
 ## Teacher workflow (Phase 2)

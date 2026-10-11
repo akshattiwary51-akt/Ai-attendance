@@ -4,11 +4,16 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from datetime import datetime
+
+from src.components.subject_card import subject_card
 from src.services import dashboard_service, subject_service
+from src.ui import charts
 from src.ui.feedback import show_error
-from src.ui.widgets import empty_state, kpi_row, risk_badge_html
+from src.ui.widgets import empty_state, kpi_row, page_header, plain_status, section, status_badge_html
 from src.utils.errors import AppError
-from src.utils.timefmt import format_local
+from src.utils.html import esc
+from src.utils.timefmt import format_local, local_tz, parse_ts
 
 _RISK_TEXT = {"HIGH": "High risk", "MEDIUM": "Watch", "LOW": "On track", "NO_DATA": "No data"}
 
@@ -17,33 +22,78 @@ def _risk_text(level: str) -> str:
     return _RISK_TEXT.get(level, "No data")
 
 
+def _goto(tab: str, **extra) -> None:
+    st.session_state.update(current_teacher_tab=tab, **extra)
+
+
 def teacher_tab_dashboard() -> None:
-    teacher_id = st.session_state.teacher_data["teacher_id"]
-    st.header("Dashboard")
+    teacher = st.session_state.teacher_data
+    teacher_id = teacher["teacher_id"]
+    page_header(f"Welcome, {teacher['name']}", "Today's classes, the students who need attention, and what to do next.", ("Teacher", "Dashboard"))
     try:
-        ov = dashboard_service.teacher_overview(teacher_id)
+        with st.spinner("Loading your dashboard…"):
+            ov = dashboard_service.teacher_overview(teacher_id)
+            subjects = subject_service.list_teacher_subjects(teacher_id)
     except AppError as exc:
         show_error(exc)
         return
     if ov.total_subjects == 0:
         empty_state("No subjects yet", "Create your first subject in the Subjects tab to start taking attendance.")
+        st.button("Create a subject", icon=":material/add:", type="primary", key="dash_create", on_click=_goto, args=("manage_subjects",))
         return
-    avg = f"{ov.average_attendance:g}%" if ov.average_attendance is not None else "—"
-    kpi_row([("Subjects", ov.total_subjects), ("Students", ov.total_students), ("Sessions today", ov.sessions_today)])
-    kpi_row([("Average attendance", avg), ("Low-attendance students", ov.low_attendance_students)])
 
-    st.subheader("Students needing attention")
+    open_now = [r for r in ov.recent_sessions if r["status"] == "OPEN"]
+    with st.container(key="hero"):
+        st.markdown('<p class="sc-hero-title">Ready to take attendance?</p>'
+                    '<p class="sc-hero-body">Choose a class, add classroom photos or a voice recording, and review the results before anything is saved.</p>',
+                    unsafe_allow_html=True)
+        if open_now:
+            st.markdown(f'<p class="sc-hero-body"><b>{len(open_now)} unfinished session{"s" if len(open_now) != 1 else ""}</b> waiting for review.</p>', unsafe_allow_html=True)
+        st.button("Take attendance", icon=":material/photo_camera:", type="primary", key="hero_take", on_click=_goto, args=("take_attendance",))
+
+    st.space("small")
+    avg = f"{ov.average_attendance:g}%" if ov.average_attendance is not None else "—"
+    kpi_row([("Subjects", ov.total_subjects), ("Students", ov.total_students), ("Sessions today", ov.sessions_today),
+             ("Average attendance", avg, f"{ov.low_attendance_students} student{'s' if ov.low_attendance_students != 1 else ''} below target")])
+
+    section("Today's sessions", "From your five most recent sessions.")
+    today = datetime.now(local_tz()).date()
+    todays = [r for r in ov.recent_sessions if parse_ts(r["when"]).astimezone(local_tz()).date() == today and r["status"] != "CANCELLED"]
+    if not todays:
+        empty_state("No sessions yet today", "Take attendance to start one.")
+    else:
+        for r in todays:
+            c1, c2, c3 = st.columns([3, 2, 1], vertical_alignment="center")
+            c1.markdown(f"**{esc(r['subject'])}**<br><span class='sc-sub'>{esc(format_local(r['when']))}, {esc(r['method'].replace('_', ' ').title())}</span>", unsafe_allow_html=True)
+            c2.markdown(status_badge_html(r["status"]) + (f" &nbsp;<span class='sc-sub sc-num'>{esc(r['present'])}/{esc(r['conducted'])} present</span>" if r["status"] == "COMPLETED" else ""),
+                        unsafe_allow_html=True)
+            if r["status"] == "OPEN":
+                c3.button("Finish", key=f"finish_{r['session_id']}", on_click=_goto, args=("take_attendance",), kwargs={"attendance_subject_id": None})
+
+    section("Your subjects")
+    cols = st.columns(2)
+    for i, sub in enumerate(subjects):
+        with cols[i % 2]:
+            subject_card(name=sub["name"], code=sub["subject_code"], section=sub["section"],
+                         stats=[("", "students", sub["total_students"]), ("", "classes", sub["total_classes"])])
+            b1, b2 = st.columns(2)
+            b1.button("Take attendance", key=f"dash_take_{sub['subject_id']}", icon=":material/photo_camera:", width="stretch", type="secondary",
+                      on_click=_goto, args=("take_attendance",), kwargs={"attendance_subject_id": sub["subject_id"]})
+            b2.button("View records", key=f"dash_records_{sub['subject_id']}", icon=":material/fact_check:", width="stretch", type="tertiary",
+                      on_click=_goto, args=("attendance_records",))
+
+    section("Students needing attention", "Based on each subject's attendance target.")
     if not ov.at_risk:
         st.success("Nobody is currently at risk.")
     else:
         st.dataframe(pd.DataFrame([{"Student": r["name"], "Subject": r["subject"], "Attendance %": r["percentage"],
                                     "Risk": _risk_text(r["risk"]), "Why": r["reason"]} for r in ov.at_risk[:10]]),
                      hide_index=True, width="stretch")
-    st.subheader("Recent sessions")
+    section("Recent sessions")
     if not ov.recent_sessions:
         empty_state("No sessions yet", "Take attendance to create one.")
     else:
-        st.dataframe(pd.DataFrame([{"Subject": r["subject"], "When": format_local(r["when"]), "Method": r["method"], "Status": r["status"],
+        st.dataframe(pd.DataFrame([{"Subject": r["subject"], "When": format_local(r["when"]), "Method": r["method"], "Status": plain_status(r["status"]),
                                     "Present": f"{r['present']}/{r['conducted']}"} for r in ov.recent_sessions]), hide_index=True, width="stretch")
 
 
@@ -66,7 +116,7 @@ def subject_detail_view(subject_id: int) -> None:
         if len(d["trend"]) < 2:
             st.info("The trend appears after two completed sessions.")
         else:
-            st.line_chart(pd.DataFrame({"Attendance %": [t["percentage"] for t in d["trend"]]}, index=[format_local(t["when"]) for t in d["trend"]]))
+            st.altair_chart(charts.trend_line([{"period": format_local(t["when"]), "percentage": t["percentage"]} for t in d["trend"]]), width="stretch")
     with t_sessions:
         if not d["sessions"]:
             st.info("No sessions yet.")
@@ -78,7 +128,7 @@ def subject_detail_view(subject_id: int) -> None:
 
 def teacher_tab_students() -> None:
     teacher_id = st.session_state.teacher_data["teacher_id"]
-    st.header("Students")
+    page_header("Students", "Everyone enrolled in your subjects, with their attendance and risk level.", ("Teacher", "Students"))
     try:
         people = dashboard_service.students_overview(teacher_id)
     except AppError as exc:
@@ -104,8 +154,7 @@ def teacher_tab_students() -> None:
 
 def teacher_tab_settings() -> None:
     teacher_id = st.session_state.teacher_data["teacher_id"]
-    st.header("Settings")
-    st.subheader("Attendance targets")
+    page_header("Settings", "Set the minimum attendance each subject expects. Risk levels and forecasts use these targets.", ("Teacher", "Settings"))
     try:
         subjects = subject_service.list_teacher_subjects(teacher_id)
     except AppError as exc:

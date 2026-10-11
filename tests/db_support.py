@@ -124,3 +124,5 @@ def new_session(db, who="t1", subject=1, method="FACE"):
 
 def recs(*rows):
     return json.dumps([{"student_id": s, "status": st, "source": "Photo 1"} for s, st in rows])
+
+

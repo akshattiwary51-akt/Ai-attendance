@@ -1,7 +1,7 @@
 import pandas as pd
 import streamlit as st
 
-from src.components.dialog_attendance_results import show_attendance_result
+from src.components.dialog_attendance_results import start_review
 from src.services import enrollment_service, fusion_service, recognition_service, session_service
 from src.ui.feedback import show_error
 from src.utils.errors import AppError
@@ -29,15 +29,9 @@ def combined_attendance_dialog(subject_id: int, images: list):
                     result = fusion_service.fuse(roster, face, voice)
                     session_service.record_recognition_stats(teacher_id, session["session_id"], recognition_service.face_stats(face))
                     rows, records = fusion_service.rows_and_records(roster, result)
-                    st.session_state.combined_attendance_results = (pd.DataFrame(rows), records, session["session_id"], result.notes)
+                    start_review(pd.DataFrame(rows), records, session["session_id"], subject_id, "FACE_PLUS_VOICE", result.notes)
             except AppError as exc:
                 show_error(exc)
-    pending = st.session_state.get("combined_attendance_results")
-    if pending:
-        try:
-            owned = session_service.get_owned_session(teacher_id, pending[2])
-        except AppError:
-            owned = None
-        if owned and owned["subject_id"] == subject_id and owned["status"] == "OPEN":
-            st.divider()
-            show_attendance_result(*pending)
+            else:
+                if st.session_state.get("attendance_review"):
+                    st.rerun()

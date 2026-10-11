@@ -53,7 +53,7 @@ def test_default_tab_is_dashboard_with_kpis_and_at_risk(teacher_app):
     at.session_state["login_type"] = "teacher"; at.session_state["teacher_data"] = {"teacher_id": 1, "name": "T"}
     at.run()
     assert not at.exception
-    assert kpi(at, "Subjects") == "1" and kpi(at, "Students") == "2" and kpi(at, "Low-attendance students") == "1"
+    assert kpi(at, "Subjects") == "1" and kpi(at, "Students") == "2" and kpi(at, "Average attendance") is not None and any("1 student below target" in m.value for m in at.markdown)
     assert any("Low One" in str(d.value.values) for d in at.dataframe)
 
 

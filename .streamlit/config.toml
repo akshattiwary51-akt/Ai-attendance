@@ -1,0 +1,48 @@
+# Native Streamlit theme. Widgets (inputs, tables, charts) follow these colours; src/ui/theme.py reads the
+# same palette for the custom components, so edit both together.
+[server]
+headless = true
+maxUploadSize = 10
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+
+[theme]
+baseRadius = "0.6rem"
+font = "sans-serif"
+headingFontWeights = [700, 650, 600, 600, 600, 600]
+
+[theme.light]
+primaryColor = "#4F46E5"
+backgroundColor = "#F8FAFC"
+secondaryBackgroundColor = "#EEF2FF"
+textColor = "#0F172A"
+borderColor = "#E2E8F0"
+greenColor = "#16A34A"
+redColor = "#DC2626"
+orangeColor = "#D97706"
+violetColor = "#7C3AED"
+blueColor = "#4F46E5"
+
+[theme.light.sidebar]
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F1F5F9"
+
+[theme.dark]
+primaryColor = "#818CF8"
+backgroundColor = "#0B1120"
+secondaryBackgroundColor = "#182036"
+textColor = "#E2E8F0"
+borderColor = "#27324D"
+greenColor = "#4ADE80"
+redColor = "#F87171"
+orangeColor = "#FBBF24"
+violetColor = "#A78BFA"
+blueColor = "#818CF8"
+
+[theme.dark.sidebar]
+backgroundColor = "#0F172A"
+secondaryBackgroundColor = "#182036"

@@ -90,11 +90,11 @@ def test_student_dashboard_shows_forecast_with_reasons(monkeypatch):
         monkeypatch.setattr(ar, "subject_student_attendance", lambda ids=None: [
             {"subject_id": 1, "student_id": 9, "attended": 3, "conducted": 6, "excused": 0, "last_session_at": None}])
         at = AppTest.from_file(APP, default_timeout=30)
-        for k, v in dict(login_type="student", student_data={"student_id": 9, "name": "Hamza"}, auth={**AUTH, "role": "STUDENT", "student_id": 9, "teacher_id": None}).items():
+        for k, v in dict(login_type="student", current_student_page="trends", student_data={"student_id": 9, "name": "Hamza"}, auth={**AUTH, "role": "STUDENT", "student_id": 9, "teacher_id": None}).items():
             at.session_state[k] = v
         at.run()
         assert not at.exception, at.exception
-        assert any("Trends and forecast" in h.value for h in at.header)
+        assert any("Trends and forecast" in m.value for m in at.markdown)
         ex = next(e for e in at.expander if e.label.startswith("DSA"))
         assert "High risk" in ex.label and "chance of ending below 75%" in ex.label
         body = " ".join(m.value for m in ex.markdown)
@@ -113,7 +113,7 @@ def test_admin_anomalies_tab(monkeypatch):
         monkeypatch.setattr(ar, "sessions_detail", lambda ids=None: [])
         monkeypatch.setattr(ar, "session_summaries", lambda subject_id=None: [])
         at = AppTest.from_file(APP, default_timeout=30)
-        for k, v in admin_state().items():
+        for k, v in {**admin_state(), "current_admin_page": "anomalies"}.items():
             at.session_state[k] = v
         at.run()
         assert not at.exception and any("No unusual patterns detected across the system" in s.value for s in at.success)

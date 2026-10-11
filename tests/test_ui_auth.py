@@ -34,7 +34,7 @@ def stub_teacher_world(monkeypatch):
     monkeypatch.setattr(session_repository, "find_open", lambda sid: None)
 
 
-def login(at, email, pw, button="Login"):
+def login(at, email, pw, button="Log in"):
     at.text_input[0].set_value(email); at.text_input[1].set_value(pw)
     return next(b for b in at.button if b.label == button).click().run()
 
@@ -47,7 +47,7 @@ def test_teacher_login_success_stores_tokens_and_shows_dashboard(provider, monke
     at = login(fresh(login_type="teacher"), "t@x.co", "pw-123456")
     assert not at.exception
     assert at.session_state["teacher_data"]["name"] == "Ananya" and at.session_state["auth"]["role"] == "TEACHER"
-    assert any("Welcome, Ananya" in s.value for s in at.subheader)
+    assert any("Welcome, Ananya" in m.value for m in at.markdown)
 
 
 def test_login_failures_show_messages_and_store_nothing(provider, monkeypatch):
@@ -164,8 +164,8 @@ def test_student_registration_without_consent_or_photo_is_blocked(provider):
     at = fresh(login_type="student", student_login_type="register")
     texts = {t.label: t for t in at.text_input}
     texts["Full name"].set_value("Hamza"); texts["Email"].set_value("h@x.co")
-    texts["Password (min 8 characters)"].set_value("password123"); texts["Confirm password"].set_value("password123")
-    next(b for b in at.button if b.label == "Create Account").click().run()
+    texts["Password"].set_value("password123"); texts["Confirm password"].set_value("password123")
+    next(b for b in at.button if b.label == "Create account").click().run()
     assert not at.exception and any("biometric" in w.value.lower() for w in at.warning)
     assert not provider.users                                                  # nothing was created
 
@@ -180,4 +180,5 @@ def test_student_dashboard_prompts_for_a_face_sample_when_none_exists_for_the_mo
     monkeypatch.setattr(student_repository, "my_face_sample_counts", lambda: {"dlib-resnet-128": 2})
     at = fresh(login_type="student", student_data={"student_id": 9, "name": "Hamza"}, auth={**AUTH, "role": "STUDENT", "student_id": 9, "teacher_id": None})
     assert not at.exception and not any("no face sample" in w.value for w in at.warning)
-    assert any("2 of 5" in e.label for e in at.expander)
+    at = fresh(login_type="student", current_student_page="samples", student_data={"student_id": 9, "name": "Hamza"}, auth={**AUTH, "role": "STUDENT", "student_id": 9, "teacher_id": None})
+    assert not at.exception and any("2 of 5" in h.value for h in at.subheader)

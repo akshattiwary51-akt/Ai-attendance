@@ -17,7 +17,7 @@ def student_app(monkeypatch):
     monkeypatch.setattr(attendance_repository, "list_for_student", lambda sid: [
         {"record_id": i, "status": "PRESENT", "attendance_sessions": {"subject_id": 1, "started_at": f"2026-03-{i + 1:02d}T10:00:00+00:00"}} for i in range(1, 10)])
     at = AppTest.from_file(APP, default_timeout=30)
-    for k, v in dict(login_type="student", student_data={"student_id": 9, "name": "Hamza"}, auth={**AUTH, "role": "STUDENT", "student_id": 9, "teacher_id": None}).items():
+    for k, v in dict(login_type="student", current_student_page="assistant", student_data={"student_id": 9, "name": "Hamza"}, auth={**AUTH, "role": "STUDENT", "student_id": 9, "teacher_id": None}).items():
         at.session_state[k] = v
     return at.run()
 

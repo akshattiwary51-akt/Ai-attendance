@@ -3,57 +3,52 @@ from __future__ import annotations
 
 import streamlit as st
 
-from src.components.header import header_dashboard
+from src.components.footer import footer_home
 from src.services import auth_service
 from src.ui.auth_forms import login_form
 from src.ui.feedback import show_error
+from src.ui.shell import auth_layout
 from src.utils.errors import AppError
 
-
-def _top_bar() -> None:
-    c1, c2 = st.columns(2, vertical_alignment="center", gap="large")
-    with c1:
-        header_dashboard()
-    with c2:
-        if st.button("Go back to Home", type="secondary", key="loginbackbtn", shortcut="control+backspace"):
-            st.session_state["login_type"] = None
-            st.rerun()
+_POINTS = ["Take attendance from classroom photos, a voice recording, or both.",
+           "Review every result before it is saved. Nothing is recorded until you confirm.",
+           "Correct a record at any time. Each correction needs a reason and is kept in the audit trail."]
 
 
 def teacher_screen_login() -> None:
-    _top_bar()
-    st.header("Teacher login", text_alignment="center")
-    st.space()
-    login_form("TEACHER", "teacher")
-    st.divider()
-    if st.button("New here? Register", type="primary", icon=":material/passkey:", width="stretch"):
-        st.session_state.teacher_login_type = "register"
-        st.rerun()
+    with auth_layout("Attendance you can check and trust", _POINTS):
+        st.header("Teacher login")
+        st.caption("Use the email and password you registered with.")
+        login_form("TEACHER", "teacher")
+        st.divider()
+        st.caption("New to SnapClass?")
+        if st.button("Create a teacher account", type="secondary", icon=":material/person_add:", width="stretch"):
+            st.session_state.teacher_login_type = "register"
+            st.rerun()
+    footer_home()
 
 
 def teacher_screen_register() -> None:
-    _top_bar()
-    st.header("Register your teacher profile")
-    st.space()
-    name = st.text_input("Full name", placeholder="Ananya Roy")
-    email = st.text_input("Email", placeholder="ananya@college.edu")
-    password = st.text_input("Password (min 8 characters)", type="password")
-    confirm = st.text_input("Confirm your password", type="password")
-    st.divider()
-
-    b1, b2 = st.columns(2)
-    with b1:
-        if st.button("Register now", icon=":material/passkey:", shortcut="control+enter", width="stretch"):
+    with auth_layout("Set up your teacher account", _POINTS[:1] + ["An administrator approves new teacher accounts before the first login."]):
+        st.header("Register your teacher profile")
+        st.caption("All fields are required.")
+        name = st.text_input("Full name", placeholder="Ananya Roy", key="reg_t_name", autocomplete="name")
+        email = st.text_input("Email", placeholder="ananya@college.edu", key="reg_t_email", autocomplete="email")
+        password = st.text_input("Password", type="password", help="At least 8 characters.", key="reg_t_pw", autocomplete="new-password")
+        confirm = st.text_input("Confirm password", type="password", key="reg_t_pw2", autocomplete="new-password")
+        if st.button("Create account", icon=":material/person_add:", shortcut="control+enter", type="primary", width="stretch"):
             try:
-                result = auth_service.register_teacher(email, name, password, confirm)
+                with st.spinner("Creating your account…"):
+                    result = auth_service.register_teacher(email, name, password, confirm)
             except AppError as exc:
                 show_error(exc)
             else:
                 if result.pending_approval:
                     st.success("Account created. An administrator must approve it before you can log in.")
                 else:
-                    st.success("Account created! You can log in now. (If email confirmation is enabled, confirm your email first.)")
-    with b2:
-        if st.button("Login Instead", type="primary", icon=":material/passkey:", width="stretch"):
+                    st.success("Account created. You can log in now. If email confirmation is enabled, confirm your email first.")
+        st.divider()
+        if st.button("I already have an account", type="tertiary", icon=":material/login:", width="stretch"):
             st.session_state.teacher_login_type = "login"
             st.rerun()
+    footer_home()

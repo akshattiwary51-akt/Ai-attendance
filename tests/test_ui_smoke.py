@@ -14,13 +14,13 @@ def run(**state):
 def test_home_boots_without_any_configuration():
     at = run()
     assert not at.exception
-    assert {b.label for b in at.button} >= {"Student Portal", "Teacher Portal"}
+    assert {b.label for b in at.button} >= {"Continue as student", "Continue as teacher"}
 
 
 def test_teacher_login_with_missing_config_shows_friendly_error():
     at = run(login_type="teacher")
     at.text_input[0].set_value("someone@x.co"); at.text_input[1].set_value("password123")
-    next(b for b in at.button if b.label == "Login").click().run()
+    next(b for b in at.button if b.label == "Log in").click().run()
     assert not at.exception
     assert any("not configured" in e.value.lower() or "failed" in e.value.lower() for e in at.error)
 
@@ -29,7 +29,7 @@ def test_teacher_registration_validation_messages_are_shown():
     at = run(login_type="teacher", teacher_login_type="register")
     at.text_input[0].set_value("N"); at.text_input[1].set_value("not-an-email")
     at.text_input[2].set_value("password123"); at.text_input[3].set_value("password123")
-    next(b for b in at.button if b.label == "Register now").click().run()
+    next(b for b in at.button if b.label == "Create account").click().run()
     assert not at.exception and any("valid email" in w.value for w in at.warning)
 
 
