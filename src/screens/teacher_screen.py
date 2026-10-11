@@ -9,11 +9,13 @@ from src.components.assistant_chat import assistant_chat
 from src.components.dialog_create_subject import create_subject_dialog
 from src.components.dialog_share_subject import share_subject_dialog
 from src.components.footer import footer_home
+from src.components.invite_panel import invite_panel, requests_panel
 from src.components.subject_card import subject_card
 from src.screens.attendance_flow import teacher_tab_take_attendance
 from src.screens.teacher_analytics import teacher_tab_analytics
 from src.screens.teacher_auth import teacher_screen_login, teacher_screen_register
 from src.screens.teacher_insights import subject_detail_view, teacher_tab_dashboard, teacher_tab_settings, teacher_tab_students
+from src.screens.teacher_reports import teacher_tab_reports
 from src.screens.teacher_sessions import teacher_tab_attendance_records
 from src.services import subject_service
 from src.ui.feedback import show_error
@@ -29,6 +31,7 @@ NAV = [
     NavItem("students", "Students", ":material/groups:"),
     NavItem("attendance_records", "Sessions and records", ":material/fact_check:"),
     NavItem("analytics", "Analytics", ":material/monitoring:"),
+    NavItem("reports", "Reports", ":material/download:"),
     NavItem("assistant", "Assistant", ":material/smart_toy:"),
     NavItem("settings", "Settings", ":material/settings:"),
 ]
@@ -48,7 +51,7 @@ def teacher_dashboard() -> None:
     page = sidebar(role_label="Teacher", name=teacher["name"], items=NAV, state_key=TAB_KEY, cta=TAKE, default="dashboard")
     {"dashboard": teacher_tab_dashboard, "manage_subjects": teacher_tab_manage_subjects, "students": teacher_tab_students,
      "analytics": teacher_tab_analytics, "take_attendance": teacher_tab_take_attendance, "attendance_records": teacher_tab_attendance_records,
-     "settings": teacher_tab_settings, "assistant": teacher_tab_assistant}[page]()
+     "settings": teacher_tab_settings, "reports": teacher_tab_reports, "assistant": teacher_tab_assistant}[page]()
 
 
 def teacher_tab_assistant() -> None:
@@ -75,6 +78,7 @@ def teacher_tab_manage_subjects() -> None:
     if st.button("Create a subject", type="primary", icon=":material/add:", key="create_subject"):
         create_subject_dialog(teacher_id)
 
+    requests_panel()
     subjects = _load_subjects(teacher_id)
     if subjects is None:
         return
@@ -91,3 +95,5 @@ def teacher_tab_manage_subjects() -> None:
         )
         with st.expander(f"Details: {sub['name']}"):
             subject_detail_view(sub["subject_id"])
+        with st.expander(f"Invites: {sub['name']}"):
+            invite_panel(sub)

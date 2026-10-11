@@ -12,12 +12,13 @@ from src.components.dialog_enroll import enroll_dialog
 from src.components.footer import footer_home
 from src.components.subject_card import subject_card
 from src.screens.teacher_analytics import RISK_TEXT
-from src.services import analytics_service, auth_service, dashboard_service, enrollment_service, recognition_service
+from src.services import analytics_service, auth_service, dashboard_service, enrollment_service, notification_service, recognition_service, report_service
 from src.ui import charts
 from src.ui.auth_forms import login_form
 from src.ui.feedback import show_error
+from src.ui.notifications import notifications_panel
 from src.ui.shell import NavItem, auth_layout, sidebar
-from src.ui.widgets import empty_state, kpi_row, note, page_header, progress_html, risk_badge_html, section, standing_message, status_text
+from src.ui.widgets import empty_state, kpi_row, note, page_header, plain_status, progress_html, risk_badge_html, section, standing_message, status_text
 from src.utils.errors import AppError
 from src.utils.html import esc
 from src.utils.images import load_image
@@ -169,6 +170,9 @@ def _history_page(student_id: int) -> None:
     kpi_row([("Classes shown", len(shown)), ("Attended", attended), ("Missed", len(counted) - attended)])
     st.dataframe(pd.DataFrame([{"Date": format_local(r["when"]), "Subject": r["subject"], "Status": status_text(r["status"])} for r in shown]),
                  hide_index=True, width="stretch")
+    st.download_button("Download these rows (CSV)", report_service.to_csv([{"Date": format_local(r["when"]), "Subject": r["subject"], "Code": r["code"],
+                                                                           "Status": plain_status(r["status"])} for r in shown]),
+                       file_name="my-attendance.csv", mime="text/csv", icon=":material/download:", key="hist_csv")
 
 
 def _overview_page(student: dict) -> None:
@@ -190,6 +194,7 @@ def _overview_page(student: dict) -> None:
     except AppError as exc:
         show_error(exc)
         return
+    notifications_panel(notification_service.for_student(overview, n_faces), PAGE_KEY)
     if not overview.subjects:
         empty_state(f"You are not enrolled in any subject yet, {first}", "Use Enroll in a subject, or scan your teacher's QR code.")
         return

@@ -6,10 +6,11 @@ import streamlit as st
 
 from src.components.footer import footer_home
 from src.screens.teacher_analytics import show_anomalies
-from src.services import admin_service, analytics_service
+from src.services import admin_service, analytics_service, notification_service, report_service
 from src.ui import charts
 from src.ui.auth_forms import login_form
 from src.ui.feedback import show_error
+from src.ui.notifications import notifications_panel
 from src.ui.shell import NavItem, auth_layout, sidebar
 from src.ui.widgets import badge_html, empty_state, kpi_row, page_header, section, status_badge_html
 from src.utils.errors import AppError
@@ -80,6 +81,13 @@ def _user_table(role: str, rows: list[dict], id_key: str) -> None:
         _toggle(role, pick[id_key], True)
 
 
+def _safe_flags() -> int:
+    try:
+        return sum(a.severity == "HIGH" for a in analytics_service.admin_anomalies())
+    except AppError:
+        return 0
+
+
 def _overview(teachers: list[dict]) -> None:
     admin = st.session_state.admin_data
     page_header(f"Welcome, {admin['name']}", "System activity, pending approvals and totals across all subjects.", ("Admin", "Overview"))
@@ -93,6 +101,8 @@ def _overview(teachers: list[dict]) -> None:
     kpi_row([("Sessions today", ov["sessions_today"]), ("Classes attended", ov["attended"]), ("Records counted", ov["conducted"]),
              ("Average attendance", f"{float(avg):g}%" if avg is not None else "—")])
 
+    anomalies = _safe_flags()
+    notifications_panel(notification_service.for_admin(ov, anomalies), PAGE_KEY)
     section("Teacher approvals", "New teacher accounts stay inactive until you approve them.")
     pending = [t for t in teachers if not t["is_active"]]
     if not pending:
@@ -146,7 +156,8 @@ def _dashboard() -> None:
         if not audit:
             empty_state("No audit entries yet", "Approvals, corrections and account changes are recorded here.")
         else:
-            st.dataframe([{"When": format_local(a["created_at"]), "Actor": f"{a['actor_role']} {a['actor_id'] or ''}".strip(), "Action": a["action"],
-                           "Entity": f"{a['entity_type']} {a['entity_id'] or ''}".strip()} for a in audit], hide_index=True, width="stretch")
+            rows = report_service.audit_rows(audit)
+            st.dataframe(rows, hide_index=True, width="stretch")
+            st.download_button("Download audit log (CSV)", report_service.to_csv(rows), file_name="audit-log.csv", mime="text/csv", icon=":material/download:", key="audit_csv")
     else:
         _overview(teachers)

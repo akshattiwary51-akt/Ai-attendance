@@ -21,3 +21,6 @@ resemblyzer
 supabase>=2.0
 postgrest>=0.16
 segno>=1.6
+
+# Excel report export (CSV export needs nothing extra)
+openpyxl>=3.1

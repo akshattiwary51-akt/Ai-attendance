@@ -7,9 +7,10 @@ import streamlit as st
 from datetime import datetime
 
 from src.components.subject_card import subject_card
-from src.services import dashboard_service, subject_service
+from src.services import analytics_service, dashboard_service, invite_service, notification_service, subject_service
 from src.ui import charts
 from src.ui.feedback import show_error
+from src.ui.notifications import notifications_panel
 from src.ui.widgets import empty_state, kpi_row, page_header, plain_status, section, status_badge_html
 from src.utils.errors import AppError
 from src.utils.html import esc
@@ -20,6 +21,17 @@ _RISK_TEXT = {"HIGH": "High risk", "MEDIUM": "Watch", "LOW": "On track", "NO_DAT
 
 def _risk_text(level: str) -> str:
     return _RISK_TEXT.get(level, "No data")
+
+
+TAB_KEY = "current_teacher_tab"
+
+
+def _safe(fn, default):
+    """Notifications are a convenience: a failing lookup must never break the dashboard."""
+    try:
+        return fn()
+    except AppError:
+        return default
 
 
 def _goto(tab: str, **extra) -> None:
@@ -51,7 +63,10 @@ def teacher_tab_dashboard() -> None:
             st.markdown(f'<p class="sc-hero-body"><b>{len(open_now)} unfinished session{"s" if len(open_now) != 1 else ""}</b> waiting for review.</p>', unsafe_allow_html=True)
         st.button("Take attendance", icon=":material/photo_camera:", type="primary", key="hero_take", on_click=_goto, args=("take_attendance",))
 
+    pending = _safe(lambda: len(invite_service.pending_requests()), 0)
+    flags = _safe(lambda: sum(a.severity == "HIGH" for a in analytics_service.teacher_anomalies(teacher_id)), 0)
     st.space("small")
+    notifications_panel(notification_service.for_teacher(ov, pending, flags), TAB_KEY)
     avg = f"{ov.average_attendance:g}%" if ov.average_attendance is not None else "—"
     kpi_row([("Subjects", ov.total_subjects), ("Students", ov.total_students), ("Sessions today", ov.sessions_today),
              ("Average attendance", avg, f"{ov.low_attendance_students} student{'s' if ov.low_attendance_students != 1 else ''} below target")])

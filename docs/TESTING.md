@@ -49,3 +49,9 @@ Not covered by automated tests: **GoTrue / Supabase Auth itself** (sign-up, sign
 
 ## Phase 10 tests
 `test_assistant.py` (schema validation incl. NaN/bool/unknown keys, role gates, identity-from-principal, subject resolution, routing, exact answers, rate limit, scripted-LLM loop incl. cross-role/injection attempts and bounded rounds, Anthropic adapter with a fake module, safe error text), `test_ui_assistant.py` (chat panel, logout clears history), and `test_integration_stack.py::test_assistant_answers_are_scoped_by_the_database`.
+
+## UI redesign tests
+`tests/test_ui_redesign.py`: WCAG AA contrast for every text/status token pair in both themes, non-colour-only status, stepper semantics, HTML escaping, role-specific navigation, the review/save/discard flow (single save, in-flight guard, confirmation before discard), confirmation before reopen/undo/deactivate, and student history filters. Full suite with the database stack: 419 passed.
+
+## Phase 11 tests
+`tests/test_invites.py` (database + PostgREST + JWT): token never stored, single-use and exhausted invites, expiry/revocation/not-yet-open/unknown/malformed tokens, approval flow (idempotent request, teacher isolation, decide once, audit trail), rejection, owner-only create/revoke/list, parameter limits, no over-use, and the real-database subject report with teacher/student isolation. `tests/test_reports_notifications.py`: CSV/Excel output and formula-injection guard, notification rules and escaping. Full suite with the stack: 434 passed.
