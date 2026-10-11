@@ -4,7 +4,6 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from src.components.footer import footer_dashboard
 from src.components.header import header_dashboard
 from src.screens.teacher_analytics import show_anomalies
 from src.services import admin_service, analytics_service
@@ -33,7 +32,6 @@ def admin_screen() -> None:
     st.header("Administrator login", text_alignment="center")
     st.space()
     login_form("ADMIN", "admin")
-    footer_dashboard()
 
 
 def _toggle(role: str, entity_id: int, active: bool) -> None:
@@ -109,4 +107,3 @@ def _dashboard() -> None:
         else:
             st.dataframe([{"When": format_local(a["created_at"]), "Actor": f"{a['actor_role']} {a['actor_id'] or ''}".strip(), "Action": a["action"],
                            "Entity": f"{a['entity_type']} {a['entity_id'] or ''}".strip()} for a in audit], hide_index=True, width="stretch")
-    footer_dashboard()

@@ -7,7 +7,6 @@ import streamlit as st
 
 from src.components.assistant_chat import assistant_chat
 from src.components.dialog_enroll import enroll_dialog
-from src.components.footer import footer_dashboard
 from src.components.header import header_dashboard
 from src.components.subject_card import subject_card
 from src.screens.teacher_analytics import RISK_TEXT
@@ -140,7 +139,6 @@ def student_dashboard() -> None:
 
     if not overview.subjects:
         empty_state("You are not enrolled in any subject yet", "Use 'Enroll in Subject' or scan your teacher's QR code.")
-        footer_dashboard()
         return
 
     kpi_row([
@@ -169,7 +167,6 @@ def student_dashboard() -> None:
     st.divider()
     st.header("Ask the attendance assistant")
     assistant_chat("STUDENT")
-    footer_dashboard()
 
 
 PRIVACY_NOTICE = (
@@ -247,4 +244,3 @@ def student_screen() -> None:
         if st.button("New student? Create an account", type="primary", width="stretch"):
             st.session_state.student_login_type = "register"
             st.rerun()
-    footer_dashboard()

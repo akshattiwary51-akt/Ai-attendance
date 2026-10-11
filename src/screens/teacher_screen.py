@@ -12,7 +12,6 @@ from src.components.dialog_create_subject import create_subject_dialog
 from src.components.dialog_share_subject import share_subject_dialog
 from src.components.dialog_combined_attendance import combined_attendance_dialog
 from src.components.dialog_voice_attendance import voice_attendance_dialog
-from src.components.footer import footer_dashboard
 from src.components.header import header_dashboard
 from src.components.subject_card import subject_card
 from src.screens.teacher_auth import teacher_screen_login, teacher_screen_register
@@ -77,7 +76,6 @@ def teacher_dashboard() -> None:
      "take_attendance": teacher_tab_take_attendance, "attendance_records": teacher_tab_attendance_records, "settings": teacher_tab_settings, "assistant": teacher_tab_assistant}[
         st.session_state.current_teacher_tab
     ]()
-    footer_dashboard()
 
 
 def teacher_tab_assistant() -> None:

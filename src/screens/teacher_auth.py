@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import streamlit as st
 
-from src.components.footer import footer_dashboard
 from src.components.header import header_dashboard
 from src.services import auth_service
 from src.ui.auth_forms import login_form
@@ -30,7 +29,6 @@ def teacher_screen_login() -> None:
     if st.button("New here? Register", type="primary", icon=":material/passkey:", width="stretch"):
         st.session_state.teacher_login_type = "register"
         st.rerun()
-    footer_dashboard()
 
 
 def teacher_screen_register() -> None:
@@ -59,4 +57,3 @@ def teacher_screen_register() -> None:
         if st.button("Login Instead", type="primary", icon=":material/passkey:", width="stretch"):
             st.session_state.teacher_login_type = "login"
             st.rerun()
-    footer_dashboard()
