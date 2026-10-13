@@ -15,6 +15,8 @@ def load_image(file_like) -> Image.Image:
         raise ValidationError("upload too large", user_message=f"Image is larger than {s.max_upload_mb} MB.")
     try:
         img = Image.open(file_like)
+        if img.width * img.height > s.max_image_pixels:  # checked from the header, before any pixel decode
+            raise ValidationError("image too many pixels", user_message="That image has too many pixels. Use a smaller photo.")
         img.load()
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
         raise ValidationError("bad image", user_message="That file is not a valid image.") from exc

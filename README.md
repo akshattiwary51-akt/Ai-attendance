@@ -1,112 +1,149 @@
 # SnapClass — AI Attendance System
 
-Streamlit app for AI attendance (face + voice) backed by Supabase.
+A Streamlit application for classroom attendance with face and voice recognition, backed by Supabase (PostgreSQL + Auth).
+Teachers run attendance sessions, review the results and save them; students see their own attendance and guidance; administrators manage accounts and watch for anomalies.
 
-## Status
-Phases 1–3 of a 12-phase upgrade are complete: audit + bug fixes + layered refactor; relational schema with attendance sessions and audited corrections; Supabase Auth with ADMIN / TEACHER / STUDENT roles enforced by PostgreSQL Row Level Security. See [docs/AUDIT.md](docs/AUDIT.md) for findings and what remains.
+> **Read the limitations first.** Face and voice thresholds have **not** been measured on real classroom data, liveness is a deterrent and not anti-spoofing, and the Docker image, Supabase Auth, dlib, Resemblyzer and the Anthropic API were never exercised live in the development sandbox. See [Limitations](#limitations).
 
-## Layout
+## Architecture
+
 ```
-app.py                     entry point
-src/screens, components    Streamlit UI only
-src/services               business logic (auth, subjects, enrollment, attendance, recognition)
-src/repositories           all Supabase queries + DB-function calls (paging, typed errors)
-supabase/migrations        schema, constraints, audited DB functions, RLS lock-down
-src/pipelines              dlib / Resemblyzer + pure matching logic
-src/config, security, utils settings, bcrypt, errors, logging, image loading
-tests/                     pytest (pure logic, services, repositories, AppTest UI tests)
+Browser ── Streamlit (app.py)
+              │
+   screens / components / ui      presentation only (no queries, no business rules)
+              │
+          services                business rules: auth, subjects, enrolment, sessions, attendance,
+              │                   recognition, fusion, dashboards, analytics, reports, invites, health
+   ┌──────────┼───────────────┐
+repositories  pipelines       analytics / assistant / evaluation
+(all Supabase  (face + voice   (pure functions; fixed, role-gated assistant tools)
+ access)       models)
+   │
+PostgREST ── per-user JWT ──▶ PostgreSQL: RLS on every table, audited SECURITY DEFINER functions
 ```
 
-## Setup
-Python **3.12+**. `pip install -r requirements.txt` (dev: `requirements-dev.txt`).
-**Supabase setup**
-1. Create a Supabase project. *Authentication → Providers → Email*: keep email sign-in on; **turn "Confirm email" on** for production.
-2. *SQL Editor*: run `supabase/migrations/0001_init.sql`, then `0002_auth_rls.sql` (in order).
-3. Copy the project URL, the **anon** key and the **service_role** key into your secrets (see below).
-4. Create the first administrator: `python scripts/create_admin.py you@college.edu` (needs the three env vars; prompts for a password).
-5. Teachers register in the app and are **inactive until an admin approves them** (admin console → *Pending approvals*). Students register with email + password, a face photo and a consent tick.
+A modular monolith: one deployable app, one database. No queue, cache or orchestration layer.
 
-Copy `.env.example` → `.env` or `.streamlit/secrets.toml.example` → `.streamlit/secrets.toml` and fill in Supabase credentials.
-Run: `streamlit run app.py` · Test: `pytest` (see [docs/TESTING.md](docs/TESTING.md) for the database-backed suites)
+Key properties
+- **Identity** is a Supabase Auth account with a role profile (ADMIN / TEACHER / STUDENT). Every database call carries the logged-in user's own JWT, so Row Level Security decides what each user can see. The service-role key is used only to create accounts.
+- **Attendance sessions** go OPEN → COMPLETED or CANCELLED. Confirming is atomic and idempotent; corrections need a reason, are audited and can be undone; completed sessions can be reopened.
+- **Counting rules**: attended = PRESENT + LATE; conducted = PRESENT + LATE + ABSENT; EXCUSED is neutral; only COMPLETED sessions count.
 
-## Teacher workflow (Phase 2)
-Take Attendance → pick subject → run face/voice analysis (opens an attendance **session**; a subject can have only one open session) → review → **Confirm & Save** (atomic, idempotent) or **Discard**.
-Attendance Records → open a session → correct a record with a mandatory reason (audited), undo the latest correction, or reopen a completed session.
+## Folder structure
+```
+app.py                     entry point (session handling, ?invite= / ?join-code= links)
+src/screens, components    Streamlit pages and dialogs
+src/ui                     theme tokens, shell/sidebar, widgets, charts, notifications
+src/services               business logic
+src/repositories           every Supabase query / RPC call, typed error translation
+src/pipelines              face engines (dlib, ONNX), quality, liveness, voice, pure matching
+src/analytics              attendance math, forecast, trends, anomaly rules (pure)
+src/assistant              tools, rules router, optional LLM adapter, rate limiter
+src/evaluation             offline identification metrics (used by scripts/evaluate_models.py)
+src/security, config, database, utils   principal/auth provider, settings, clients, errors, logging
+supabase/migrations        0001 … 0007 (schema, RLS, views, samples, stats, invites)
+scripts                    create_admin.py, evaluate_models.py, test_stack.sh, ui_preview.py
+tests/                     pytest (unit, AppTest UI, real PostgreSQL + PostgREST + JWT integration)
+docs/                      AUDIT.md (original bugs), FEATURES.md (per-phase notes), TESTING.md, SECURITY.md
+Dockerfile, docker-compose.yml
+```
 
-## Security model (Phase 3)
-- Credentials live in **Supabase Auth**; the app has no password hashes of its own.
-- After login every database call carries **the user's own JWT**, so PostgreSQL RLS decides what they can see: students see only their own enrolments/attendance; teachers only their own subjects, sessions and enrolled students; admins see accounts and the audit log but **not biometric templates**; the anon key sees nothing.
-- All writes to attendance go through `SECURITY DEFINER` functions that read the caller from `auth.uid()` (no client-supplied ids) and write the audit log in the same transaction.
-- The **service-role key is used only** to provision accounts and bootstrap the first admin. It never serves user queries.
-- Face recognition is for *attendance only*. Face is no longer a login credential: a printed photo could impersonate any student until liveness checks exist (Phase 6).
+## Database
+Seven ordered migrations in `supabase/migrations/`; run them in order in the Supabase SQL editor (or `supabase db push`).
 
-## Phase 4 - Dashboards
+| Migration | Adds |
+|---|---|
+| 0001_init | teachers, students, face/voice profiles, subjects, enrolments, attendance sessions/records/corrections, audit log, audited functions |
+| 0002_auth_rls | role profiles, RLS on every table, identity-from-JWT functions |
+| 0003_analytics | per-subject targets, attendance views (`security_invoker`), admin overview |
+| 0004_face_samples | up to 5 model-tagged face samples per student, quality score |
+| 0005_voice_samples | up to 5 voice samples per student per model |
+| 0006_recognition_stats | per-session recognition counts (numbers only, no biometric data) |
+| 0007_invites | expiring enrolment invites (token hash only), enrolment requests and approval |
 
-- **Student**: overall %, classes missed, streak, status; per-subject progress bar with target marker and plain-language guidance ("you can miss N more classes" / "attend the next N classes to get back to target"). Below-target warning.
-- **Teacher**: tabs Dashboard (KPIs, students needing attention, recent sessions), Subjects (cards + per-subject students/trend/sessions), Students (search + risk filter), Take Attendance, Sessions, Settings (per-subject attendance target).
-- **Admin**: KPI cards from the `admin_overview` function (teachers, students, pending approvals, subjects, sessions today, average attendance).
-- Numbers come from RLS-scoped views (`v_subject_student_attendance`, `v_session_summary`, migration `0003_analytics.sql`); only COMPLETED sessions count; attended = PRESENT+LATE; EXCUSED is neutral. Risk is rule-based and explainable (not ML). Config: `ATTENDANCE_TARGET`, `RISK_BUFFER`.
-- Theme: colours are CSS variables with a dark-mode variant; the home page text contrast was fixed.
+## Features
+Teacher: subjects with target %, guided take-attendance flow (face, voice, or both), review before saving, session history with audited corrections, analytics, anomaly flags, invite links and QR codes, CSV/Excel reports, assistant.
+Student: own attendance by subject, "classes you can miss" / "classes to recover", forecast and risk, face and voice samples, history export, assistant.
+Admin: overview, approve teachers, activate/deactivate accounts, anomalies across the system, audit log, system health page.
+Details and design notes per phase: [docs/FEATURES.md](docs/FEATURES.md).
 
-## Phase 5 - Face recognition
+## Setup (local)
+Python **3.12+**.
+```bash
+pip install -r requirements.txt            # dev/test: pip install -r requirements-dev.txt
+cp .env.example .env                       # fill in the three Supabase values at least
+streamlit run app.py
+```
+Windows: use `py -3.12 -m venv .venv` and `.venv\Scripts\activate`; `dlib-bin` installs a prebuilt wheel on both Windows and Linux. Resemblyzer pulls in PyTorch (large download).
 
-- **Engine interface** (`src/pipelines/face_engine.py`): `FaceRecognitionEngine.detect_and_embed(image) -> [DetectedFace(box, embedding, det_score)]`. Engines: `dlib` (baseline, HOG + ResNet-128, Euclidean) and `onnx` (SCRFD `det_500m` + ArcFace-family `w600k_mbf`, cosine; numpy + PIL + onnxruntime only). Select with `FACE_ENGINE`.
-- **Templates are model-tagged.** `face_profiles.model` is stored with every sample and galleries are filtered by the active engine's model id - embeddings from different models are never compared. Switching engine therefore means students need new samples (the student dashboard prompts for one; teachers are told how many enrolled students cannot be recognised).
-- **Multi-sample**: up to 5 active samples per student per model (`add_face_sample`, `remove_face_samples`, `my_face_sample_counts`; audited). A student's score is their best sample (or the mean of the best `FACE_TOP_K`).
-- **Match statuses**: `RECOGNIZED`, `UNKNOWN` (nobody within threshold), `AMBIGUOUS` (two *different students* within `FACE_MARGIN` - never marked, reported for manual check), `TOO_SMALL` (below `MIN_FACE_PX`). Per-photo outcomes, photos with no face and unenrolled-for-model students are summarised for the teacher before they confirm. Confidence stored on records is a normalised 0-1 score.
-- **ONNX models** are not in the repo (licence/size). Download the InsightFace `buffalo_sc` pack and put `det_500m.onnx` and `w600k_mbf.onnx` in `ONNX_MODEL_DIR`. Check the licence of the pack for your use (InsightFace pretrained models are for non-commercial research unless licensed).
-- **Not validated**: thresholds are the engines' conventional defaults. I could only test same-person stability on one public photo; there was no multi-person dataset available offline, so false-accept/false-reject rates for your classroom are unmeasured. Calibrate on your own consented data (the evaluation utility arrives in Phase 12).
+**Supabase**
+1. Create a project. *Authentication → Providers → Email*: keep email sign-in on and turn **Confirm email** on for production.
+2. Run the seven migrations in order.
+3. Copy the project URL, the **anon** key and the **service_role** key into `.env` (or `.streamlit/secrets.toml`).
+4. Create the first administrator: `python scripts/create_admin.py you@college.edu` (prompts for a password).
+5. Teachers register in the app and stay inactive until an admin approves them (`REQUIRE_TEACHER_APPROVAL`). Students register with email, password, a face photo and a consent tick.
 
-## Phase 6 - Face quality and liveness
+## Deployment (Docker)
+```bash
+cp .env.example .env     # real values; .env is git-ignored and excluded from the image
+docker compose up --build
+# open http://localhost:8501
+```
+- The container runs as a non-root user with a read-only root filesystem and a health check on Streamlit's `/_stcore/health`.
+- The database is your Supabase project; the container has no database of its own.
+- For `FACE_ENGINE=onnx`, put the model files in `./models` (mounted read-only) — see [docs/FEATURES.md](docs/FEATURES.md#phase-5---face-recognition).
+- Put a TLS-terminating reverse proxy in front for anything beyond localhost and set `APP_BASE_URL` to the public https URL (invite links are built from it).
+- Streamlit Community Cloud also works: push the repo, add the same keys under *Secrets*.
+- After deploying, sign in as the admin and open **System**: it checks configuration, models and that all migrations were applied.
+- **The Dockerfile and compose file were written and the compose file syntax-checked, but the image was not built or run** (no container runtime was available in the development sandbox). Expect to iterate on first build.
 
-- **Quality gate** (`src/pipelines/face_quality.py`, numpy only): sharpness, brightness, contrast, clipping, face size, cut-off at the frame edge and detector confidence give a 0-100 score and specific user-facing reasons ("The photo is blurry..."). Enrolment photos must pass strictly; the score is stored in `face_profiles.quality_score`.
-- **Classroom photos**: faces that are hopelessly blurry/dark/small (below `CLASSROOM_MIN_QUALITY` or smeared) get status `LOW_QUALITY`: they are **not** auto-marked and the teacher is told to check manually.
-- **Liveness** (`src/pipelines/liveness.py`): at registration (`LIVENESS_MODE=challenge`) the student takes a second photo after a random challenge (closer / farther / higher / lower). We require one face in each photo, the same person, two different pictures, and the requested movement.
-- **Honest limits**: this deters casual spoofing (a still photo or screenshot). It does NOT stop someone who moves a photo/plays a video as asked, or a 3-D mask; no trained anti-spoofing model is bundled. Head pose is not measured (engines expose no landmarks). Add a model behind `LivenessChecker` or verify enrolment in person for high-stakes use. Extra samples added later by a logged-in student are quality-gated but need no challenge (the account is password-authenticated).
+## Environment variables
+Set in the environment, `.env`, or Streamlit secrets. `.env.example` has every variable with comments.
 
-## Phase 7 - Voice
+| Variable | Default | Purpose |
+|---|---|---|
+| SUPABASE_URL, SUPABASE_ANON_KEY | – (required) | project URL and public key (used with each user's JWT) |
+| SUPABASE_SERVICE_ROLE_KEY | – | **secret**; account provisioning and admin bootstrap only |
+| REQUIRE_TEACHER_APPROVAL | true | new teachers inactive until approved |
+| APP_BASE_URL, APP_TIMEZONE | example URL, UTC | invite links; display time zone (IANA name) |
+| ATTENDANCE_TARGET, RISK_BUFFER | 75, 5 | default target %; points above target counted as "watch" |
+| FACE_ENGINE | dlib | `dlib` or `onnx` (`ONNX_MODEL_DIR`, `ONNX_DET_MODEL`, `ONNX_REC_MODEL`) |
+| FACE_THRESHOLD, FACE_MARGIN, FACE_TOP_K, MIN_FACE_PX | engine default | matching policy (unset = engine default) |
+| LIVENESS_MODE | challenge | `challenge` or `off` |
+| CLASSROOM_MIN_QUALITY | 35 | below this, classroom faces are flagged, not marked |
+| VOICE_THRESHOLD, VOICE_MARGIN | 0.65, 0.05 | cosine similarity and runner-up gap |
+| VOICE_ENROL_SECONDS, VOICE_MIN_SNR_DB, MIN_SPEECH_SECONDS | 2.0, 10, 0.5 | audio quality gates |
+| FUSION_VOICE_WEIGHT, FUSION_REVIEW_BELOW, FUSION_VOICE_ONLY | 0.6, 0.6, review | face+voice rules |
+| ASSISTANT_MODE | rules | `rules` or `llm` (`ASSISTANT_MODEL`, **secret** `ANTHROPIC_API_KEY`, `ASSISTANT_RATE_PER_HOUR`) |
+| MAX_UPLOAD_MB, MAX_IMAGE_SIDE, MAX_IMAGE_PIXELS | 10, 2000, 40000000 | image limits |
+| MAX_AUDIO_MB, MAX_AUDIO_SECONDS | 15, 600 | audio limits |
+| LOG_LEVEL | INFO | logging |
 
-- **Backend interface** (`src/pipelines/voice_pipeline.py`): `VoiceBackend.decode/embed`; Resemblyzer is the baseline (lazy import, so the app runs without it).
-- **Audio quality** (`voice_quality.py`, numpy only): speech length, level, clipping and signal-to-noise ratio, with user-facing reasons. Enrolment recordings must pass; classroom segments below quality are `LOW_QUALITY` and never marked.
-- **Segmentation**: energy-based voice activity detection; short gaps bridged, blips dropped, runs longer than 6 s cut into 3 s windows so speakers who talk back to back are matched separately. Segment noise is judged against the whole recording's noise floor.
-- **Matching**: the same threshold + runner-up-margin policy as faces (`VOICE_THRESHOLD`, `VOICE_MARGIN`) -> RECOGNIZED / UNKNOWN / AMBIGUOUS. Ambiguous segments are not marked; the teacher is told.
-- **Multiple samples**: migration `0005_voice_samples.sql` (up to 5 per student per model, quality stored, audited add/remove RPCs, students can count but never read templates). Students add samples from their dashboard.
-- **Limits**: voice is a weaker signal than the face and can be replayed from a recording (no voice anti-spoofing; no spoken-phrase verification). The VAD cannot separate overlapping speakers or reject non-speech noise that is as loud as speech. Resemblyzer was not installed in the development sandbox: the algorithms are tested with a fake encoder and synthetic audio, so real-voice accuracy and thresholds (0.65 / 0.05) are unmeasured - run the Phase 12 evaluation on real recordings before relying on it.
+## Testing
+`pytest` runs the suites that need no services (unit, service, Streamlit AppTest UI). The database-backed suites run a real PostgreSQL + PostgREST with minted JWTs and are skipped unless their env vars are set:
+```bash
+eval "$(sh scripts/test_stack.sh | grep '^export')" && pytest -q
+```
+See [docs/TESTING.md](docs/TESTING.md) for what is and is not covered.
 
-## Phase 8 - Multimodal fusion
+## Measuring recognition on your data
+```bash
+python scripts/evaluate_models.py face  --data photos/ --holdout 3 --out face_report.md
+python scripts/evaluate_models.py voice --data clips/  --holdout 3 --out voice_report.md
+```
+One folder per person. Reports FAR, FRR, misidentification, precision, recall, accuracy with confidence intervals, a threshold sweep and a suggested threshold. Get consent before collecting biometric data.
 
-"Combine Face + Voice" (Take Attendance) analyses the added photos and a voice recording together (`FACE_PLUS_VOICE` session) and applies explicit rules (`src/services/fusion_service.py`):
-seen + heard = strongest (noisy-OR of the face score and the weighted voice score); seen only = present (a student need not speak); heard only = present but flagged (or accepted/rejected via `FUSION_VOICE_ONLY`); a doubtful face whose nearest student is the one the voice recognised is resolved by the voice and flagged; no evidence = absent. Weak single-modality matches are flagged `⚠ check`. The review table shows source, confidence and the reason for each student; nothing is saved until the teacher confirms, and records can be corrected afterwards (audited).
-**Honest note**: the rules and weights are hand-set, not learned or calibrated - there is no labelled data. The combined number ranks evidence for the teacher; it is not a probability. Tune `FUSION_*` with the Phase 12 evaluation on your own recordings.
+## Security
+Summary in [docs/SECURITY.md](docs/SECURITY.md): RLS everywhere, JWT-scoped access, audited definer functions, hashed invite tokens, upload bounds, HTML escaping, spreadsheet-formula guard, redacted logging, no biometric vectors in logs or exports.
 
-## Phase 9 - Analytics, prediction, anomaly detection
+## Limitations
+- **Recognition accuracy is unmeasured.** Thresholds are the engines' conventional defaults. Use `scripts/evaluate_models.py` on consented, representative data before relying on automatic marking. Teachers review every result before saving.
+- **No anti-spoofing.** The enrolment movement challenge deters casual photo use only; voice can be replayed from a recording.
+- **Never run live in the sandbox:** dlib, Resemblyzer (voice logic tested with a fake encoder and synthetic audio), the Anthropic API (fake client), Supabase Auth/GoTrue (fake provider; the database layer is tested against real PostgreSQL + PostgREST), and the Docker image.
+- Fusion weights are hand-set; forecasts were backtested only on synthetic data.
+- Notifications are in-app only (no email/push). No PDF export. Invite tokens cannot be recovered after creation.
+- No self-service biometric deletion or consent withdrawal yet; an admin can deactivate accounts, but template deletion is a database operation.
+- The UI preview harness and browser checks used invented data; the invite, reports and notification screens were checked by automated tests but not viewed in a browser.
 
-- **Charts** (Streamlit's built-in Altair, no new dependency): attendance trend (daily / weekly / monthly, in the display timezone), present vs late vs absent vs excused, distribution, subject comparison with target markers, class heatmap (student x class), time-slot heatmap, ranking. Teacher "Analytics" tab; students get a personal weekly trend, subject comparison and forecast.
-- **Forecast** (`src/analytics/forecast.py`): interpretable Bayesian estimate - recency-weighted history updates a Beta prior; the next period's classes follow a Beta-Binomial. Gives chance of finishing below target (exact against the target boundary), expected final % with an 80% interval, the fewest classes to attend to stay on target, LOW/MEDIUM/HIGH risk and plain-language reasons (below target, consecutive absences, declining trend, little history). The number of future classes comes from the subject's own schedule (assumed 4 when too few sessions exist, and said so).
-- **Evidence of quality**: unit tests check the probabilities against brute force; `forecast.backtest()` evaluates calibration on any history. On synthetic i.i.d. data (150 students, 2550 forecasts) Brier 0.055 vs 0.245 for a naive baseline, with predicted bands close to observed frequencies. Synthetic data matches the model's assumptions, so **run `backtest` on your real history** before trusting the numbers.
-- **Anomaly flags** (`src/analytics/anomalies.py`, rule-based, flag-only - nothing is modified): duplicate records; same student present in two different subjects at overlapping times; unusual session attendance spike/drop (median/MAD); present/absent flip-flopping; high or repeated recognition failure rates (counts stored per session by migration `0006_recognition_stats.sql`, no biometric data); unusual teacher corrections (rate, bursts, late absent->present edits, repeated edits of one student). Teachers see flags for their own subjects; admins see all (cross-teacher concurrent attendance is only visible to admins).
-- Not implemented: "repeated rapid identity changes" as a recognition-level signal (identities are not stored per face), and ML-based anomaly detection (no labelled data to justify it).
-
-## Phase 10 - Attendance assistant
-
-Students and teachers can ask attendance questions in plain language (student dashboard, teacher "Assistant" tab).
-- **Never SQL.** The assistant can only call 10 fixed, read-only, validated tools (`src/assistant/tools.py`): students - `get_my_attendance`, `can_i_miss`, `classes_needed`, `my_risk_subjects`, `my_forecast`; teachers - `students_below`, `subject_attendance`, `students_missed_last`, `todays_summary`, `at_risk_students`. They call the normal services, so Postgres RLS still decides what exists for the user.
-- **Authorization**: identities come from the logged-in principal, never from the question or the model (no tool has an id parameter); each tool is role-gated; arguments are strictly validated; subjects are resolved only among the user's own; names from the database are sanitised; admins have no assistant.
-- **Two modes**: `ASSISTANT_MODE=rules` (default) - a deterministic router picks the tool and a template writes the answer; no external service, works offline. `ASSISTANT_MODE=llm` - opt-in; Claude (Messages API tool use) chooses tools and phrases the answer from tool results, in a bounded loop; falls back to rules if the key/package is missing or the call fails. **Privacy**: in LLM mode the question and the user's own result data are sent to the Anthropic API.
-- Ambiguous questions ("Can I miss 2 classes?") get a clarifying question, never a guess. Questions are length-limited and rate-limited per session; chat history lives only in the session and is cleared at logout.
-- **Honest limits**: the LLM adapter is tested with a fake client and a faked `anthropic` module, not against the live API (no key/network in the development sandbox). The rules router understands the example question styles, not arbitrary phrasing; unknown questions get a help message.
-
-## UI redesign
-Presentation only; services, repositories, RLS, recognition and the audited database functions are unchanged.
-- `src/ui/theme.py`: design tokens (light and dark) and the one stylesheet. `.streamlit/config.toml` carries the matching native theme; edit both together.
-- `src/ui/shell.py`: role-aware sidebar (logo, navigation with active indicator, profile, log out) and the signed-out auth layout. `src/ui/widgets.py` holds the shared components (page header, KPI card, status badge, stepper, empty state); `src/ui/dialogs.py` is the reusable confirmation dialog.
-- Take attendance is a guided flow (`src/screens/attendance_flow.py`): Subject, Capture, Analyze, Review, Save. The review is inline; Confirm and save is guarded against double submits and Discard asks first. Reopening a session and undoing a correction also ask first; correction reasons are still mandatory.
-- Status is always a glyph plus a word, never colour alone. Confidence is shown only when the recognition step produced a score.
-- Preview the screens without a database: `streamlit run scripts/ui_preview.py` then open `/?role=teacher|student|admin|home`. It uses invented sample data and is never imported by the app.
-- Limits: AppTest cannot click inside dialogs, so confirm buttons are checked in a browser; fonts load from Google Fonts and fall back to system fonts offline.
-
-## Phase 11 - Invites, reports, notifications
-- **Enrolment invites** (migration `0007_invites.sql`, `invite_service`, `components/invite_panel.py`): a teacher creates a link and QR code per subject with an expiry (1 hour to 30 days), a use limit, an optional enrolment window and optional per-student approval. The token is random and shown once; only its SHA-256 hash is stored (hash lookup rather than HMAC signing, because revocation and use counting need server state). Redemption is one database function with a row lock, so concurrent students cannot exceed the limit. Revoking works immediately. Every create, request, approval and enrolment is audited. Students open `/?invite=TOKEN` after logging in. The existing subject-code join still works.
-- **Reports** (`report_service`, Reports page): per-subject student summary, session list and attendance matrix as CSV, plus a multi-sheet Excel workbook (needs `openpyxl`). Students can export their own history; admins can export the audit log. Cells starting with `= + - @` are neutralised against spreadsheet formula injection. Exports use the same RLS-scoped data as the screens.
-- **Notifications** (`notification_service`): in-app alerts derived from real data (below target, no face sample, unfinished sessions, high-risk students, pending requests and approvals, flagged patterns). Nothing is stored. **Email and push delivery are not implemented.**
-- Limits: PDF reports are not provided; invite tokens cannot be recovered after creation (create a new one); the approval queue shows only name and roll number.
+## Future improvements
+Trained anti-spoofing model; self-service biometric deletion; email notifications; PDF reports; evaluation of the fused face+voice score; load testing and a rate limit on login attempts beyond Supabase's; pinned lock file.

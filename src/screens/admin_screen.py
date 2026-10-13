@@ -6,7 +6,7 @@ import streamlit as st
 
 from src.components.footer import footer_home
 from src.screens.teacher_analytics import show_anomalies
-from src.services import admin_service, analytics_service, notification_service, report_service
+from src.services import admin_service, analytics_service, health_service, notification_service, report_service
 from src.ui import charts
 from src.ui.auth_forms import login_form
 from src.ui.feedback import show_error
@@ -23,6 +23,7 @@ NAV = [
     NavItem("users", "Users", ":material/group:"),
     NavItem("anomalies", "Anomalies", ":material/flag:"),
     NavItem("audit", "Audit log", ":material/receipt_long:"),
+    NavItem("system", "System", ":material/monitor_heart:"),
 ]
 _POINTS = ["Approve new teacher accounts.", "Activate or deactivate any account.", "Review the audit trail and unusual patterns across the system."]
 
@@ -151,6 +152,8 @@ def _dashboard() -> None:
                 show_anomalies(analytics_service.admin_anomalies(), "No unusual patterns detected across the system.")
         except AppError as exc:
             show_error(exc)
+    elif page == "system":
+        _system()
     elif page == "audit":
         page_header("Audit log", "The most recent security-relevant events, newest first.", ("Admin", "Audit log"))
         if not audit:
@@ -161,3 +164,25 @@ def _dashboard() -> None:
             st.download_button("Download audit log (CSV)", report_service.to_csv(rows), file_name="audit-log.csv", mime="text/csv", icon=":material/download:", key="audit_csv")
     else:
         _overview(teachers)
+
+
+_HEALTH_KIND = {health_service.OK: "sc-ok", health_service.WARN: "sc-warn", health_service.FAIL: "sc-bad"}
+_HEALTH_WORD = {health_service.OK: "OK", health_service.WARN: "Warning", health_service.FAIL: "Problem"}
+
+
+def _system() -> None:
+    page_header("System", "Configuration, model and database checks. Secrets and setting values are never shown.", ("Admin", "System"))
+    if st.button("Run checks", key="run_health", type="primary"):
+        with st.spinner("Checking…"):
+            st.session_state.health_report = health_service.report()
+    if "health_report" in st.session_state:
+        rep = st.session_state.health_report
+        st.markdown(badge_html(f"Overall: {_HEALTH_WORD[rep['overall']]}", _HEALTH_KIND[rep["overall"]]) + f" &nbsp; version {esc(rep['version'])}", unsafe_allow_html=True)
+        for group, checks in rep["checks"].items():
+            section(group)
+            st.dataframe([{"Check": c.name, "Status": f"{_GLYPH[c.status]} {_HEALTH_WORD[c.status]}", "Detail": c.detail} for c in checks], hide_index=True, width="stretch")
+    else:
+        empty_state("No checks run yet", "Press Run checks to test configuration, models and the database.")
+
+
+_GLYPH = {health_service.OK: "✓", health_service.WARN: "!", health_service.FAIL: "✕"}

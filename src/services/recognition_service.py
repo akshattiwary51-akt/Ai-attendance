@@ -238,10 +238,23 @@ def _voice_backend(backend=None):
     return default_backend()
 
 
+def _decode_audio(backend, audio_bytes: bytes):
+    """Size-check, decode, and bound the duration of an upload before any analysis runs."""
+    s = get_settings()
+    if not audio_bytes:
+        raise ValidationError("empty audio", user_message="The recording is empty.")
+    if len(audio_bytes) > s.max_audio_mb * 1024 * 1024:
+        raise ValidationError("audio too large", user_message=f"The recording is larger than {s.max_audio_mb} MB.")
+    wav = backend.decode(audio_bytes)
+    if len(wav) > s.max_audio_seconds * 16000:
+        raise ValidationError("audio too long", user_message=f"The recording is longer than {s.max_audio_seconds // 60} minutes.")
+    return wav
+
+
 def prepare_voice_sample(audio_bytes: bytes, backend=None) -> VoiceSample:
     """Embedding of an enrolment recording after the strict audio-quality gate (speech length, level, clipping, noise)."""
     s, backend = get_settings(), _voice_backend(backend)
-    wav = backend.decode(audio_bytes)
+    wav = _decode_audio(backend, audio_bytes)
     q = voice_quality.assess(wav, s.voice_enrol_seconds, s.voice_min_snr_db)
     if not q.ok:
         raise ValidationError("poor audio " + ",".join(q.issues), user_message=" ".join(q.messages()))
@@ -315,7 +328,7 @@ def analyze_voice(audio_bytes: bytes, roster: list[dict], backend=None) -> Voice
     result = VoiceAnalysis(students_without_templates=[i for i in ids if i not in gallery], with_voice=len(gallery), model=backend.model_id)
     if not gallery:
         return result
-    wav = backend.decode(audio_bytes)
+    wav = _decode_audio(backend, audio_bytes)
     policy = voice_policy()
     spans = voice_quality.speech_intervals(wav, s.min_speech_seconds)
     result.no_speech = not spans

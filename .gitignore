@@ -4,3 +4,7 @@ __pycache__/
 .venv/
 .streamlit/secrets.toml
 .pytest_cache/
+.env.*
+!.env.example
+*.egg-info/
+reports_out/

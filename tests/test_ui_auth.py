@@ -172,6 +172,9 @@ def test_student_registration_without_consent_or_photo_is_blocked(provider):
 
 def test_student_dashboard_prompts_for_a_face_sample_when_none_exists_for_the_model(provider, monkeypatch):
     from src.repositories import student_repository
+    from src.services import recognition_service
+    # independent of whether dlib's model files are installed on the machine running the tests
+    monkeypatch.setattr(recognition_service, "current_engine", lambda: type("E", (), {"model_id": "dlib-resnet-128"})())
     monkeypatch.setattr(enrollment_repository, "subjects_of_student", lambda sid: [])
     monkeypatch.setattr(student_repository, "my_face_sample_counts", lambda: {})
     at = fresh(login_type="student", student_data={"student_id": 9, "name": "Hamza"}, auth={**AUTH, "role": "STUDENT", "student_id": 9, "teacher_id": None})

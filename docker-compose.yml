@@ -1,0 +1,19 @@
+# Runs the app container. The database is your Supabase project (cloud or `supabase start`); see README.
+# Secrets come from .env (never baked into the image):  cp .env.example .env  &&  docker compose up --build
+services:
+  app:
+    build: .
+    image: snapclass:latest
+    env_file: .env
+    ports:
+      - "8501:8501"
+    volumes:
+      # ONNX face models (FACE_ENGINE=onnx), mounted read-only; download them separately, see README.
+      - ./models:/app/models:ro
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/snap/.streamlit
+    security_opt:
+      - no-new-privileges:true

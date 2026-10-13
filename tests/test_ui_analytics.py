@@ -119,3 +119,25 @@ def test_admin_anomalies_tab(monkeypatch):
         assert not at.exception and any("No unusual patterns detected across the system" in s.value for s in at.success)
     finally:
         set_auth_provider(None)
+
+
+def test_admin_system_page_runs_checks_and_shows_no_secrets(monkeypatch):
+    from src.services import health_service as hs
+    p = FakeAuthProvider(); set_auth_provider(p)
+    monkeypatch.setenv("SUPABASE_ANON_KEY", "anon-key-must-not-appear")
+    try:
+        monkeypatch.setattr(admin_repository, "list_teachers", lambda: [])
+        monkeypatch.setattr(ar, "admin_overview", lambda tz: {"teachers": 0, "pending_teachers": 0, "students": 0, "subjects": 0, "sessions_today": 0,
+                                                              "attended": 0, "conducted": 0, "average_attendance": None})
+        monkeypatch.setattr(hs, "database_status", lambda: [hs.Check("Table teachers", hs.FAIL, "Not reachable. Was migration 0001 applied?")])
+        at = AppTest.from_file(APP, default_timeout=30)
+        for k, v in {**admin_state(), "current_admin_page": "system"}.items():
+            at.session_state[k] = v
+        at.run()
+        assert not at.exception and "Run checks" in [b.label for b in at.button]
+        next(b for b in at.button if b.label == "Run checks").click().run()
+        assert not at.exception
+        rendered = " ".join(str(x.value) for x in at.markdown) + " ".join(str(d.value) for d in at.dataframe)
+        assert "Overall: Problem" in rendered and "0001" in rendered and "anon-key-must-not-appear" not in rendered
+    finally:
+        set_auth_provider(None)

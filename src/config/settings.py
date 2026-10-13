@@ -43,6 +43,9 @@ class Settings:
     voice_min_snr_db: float         # minimum signal-to-noise ratio (dB) for enrolment / classroom segments
     max_upload_mb: int
     max_image_side: int
+    max_image_pixels: int
+    max_audio_mb: int
+    max_audio_seconds: int
     app_base_url: str
     app_timezone: str
     attendance_target: float        # default % target for new subjects
@@ -91,6 +94,9 @@ def get_settings() -> Settings:
         voice_min_snr_db=_float("VOICE_MIN_SNR_DB", 10.0),
         max_upload_mb=int(_float("MAX_UPLOAD_MB", 10)),
         max_image_side=int(_float("MAX_IMAGE_SIDE", 2000)),
+        max_image_pixels=int(_float("MAX_IMAGE_PIXELS", 40_000_000)),
+        max_audio_mb=int(_float("MAX_AUDIO_MB", 15)),
+        max_audio_seconds=int(_float("MAX_AUDIO_SECONDS", 600)),
         app_base_url=(_read("APP_BASE_URL", "https://snapclass-main.streamlit.app") or "").rstrip("/"),
         app_timezone=_read("APP_TIMEZONE", "UTC") or "UTC",
         attendance_target=_float("ATTENDANCE_TARGET", 75.0),

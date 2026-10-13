@@ -55,3 +55,7 @@ Not covered by automated tests: **GoTrue / Supabase Auth itself** (sign-up, sign
 
 ## Phase 11 tests
 `tests/test_invites.py` (database + PostgREST + JWT): token never stored, single-use and exhausted invites, expiry/revocation/not-yet-open/unknown/malformed tokens, approval flow (idempotent request, teacher isolation, decide once, audit trail), rejection, owner-only create/revoke/list, parameter limits, no over-use, and the real-database subject report with teacher/student isolation. `tests/test_reports_notifications.py`: CSV/Excel output and formula-injection guard, notification rules and escaping. Full suite with the stack: 434 passed.
+
+## Phase 12 tests
+`tests/test_upload_limits.py` (pixel/size/duration bounds, empty and oversize audio never reach the decoder), `tests/test_health.py` (config validation without leaking values, model detection, missing-migration probe with a fake database), `tests/test_evaluation.py` (metrics on synthetic embeddings with known ground truth, Wilson intervals, FAR not measurable without impostors, folder extraction with fake engines, CLI end to end). The evaluation tests prove the arithmetic; they say nothing about real face or voice accuracy.
+`tests/test_ui_analytics.py::test_admin_system_page_runs_checks_and_shows_no_secrets` covers the admin System page. Full suite with the database stack: 455 passed, 3 skipped (the skips are the real dlib/ONNX engine tests, which need model files that were not available).
